@@ -1,0 +1,23 @@
+{
+  "name": "zeus-discord-platform",
+  "description": "ZEUS discord platform",
+  "main": "platform/discord/index.js",
+  "scripts": {
+    "start": "node platform/discord/index.js",
+    "dev": "nodemon platform/discord/index.js",
+    "slash-register": "node platform/discord/scripts/slashRegister.js",
+    "slash-reset": "node platform/discord/scripts/slashRegister.js --reset",
+    "test": "node --test"
+  },
+  "keywords": [
+    "santaa"
+  ],
+  "author": "sn00bol",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "dependencies": {
+    "discord.js": "^14.19.0",
+    "dotenv": "^18.0.5",
+    "pg": "^8.23.1"
+  }
+}

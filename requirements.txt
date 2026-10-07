@@ -1,0 +1,5 @@
+httpx
+httpcore
+uvicorn
+python-dotenv
+asyncpg

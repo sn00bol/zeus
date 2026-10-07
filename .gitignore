@@ -1,0 +1,27 @@
+# enviroment file
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Javascript and python
+node_modules/
+.venv/
+__pycache__/
+*.py[codz]
+*$py.class
+
+# Database
+database/*.db*
+database/postgres/
+database/history.json
+
+# others
+test/
+**/*.test.js
+**/*.test.cjs
+.backups/
