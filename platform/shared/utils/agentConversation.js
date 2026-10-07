@@ -21,7 +21,12 @@ async function selectModel(database, scopeId) {
 
     const { models } = await requestJson('/models');
     if (!Array.isArray(models) || models.length === 0) {
-        throw new Error('No local AI models are available. Start a supported provider and load a model.');
+        throw new Error(
+            'No AI models were discovered. Check that the selected provider is running, '
+            + 'ZEUS_PROVIDER and LLM_PORT are correct, and that LLM_HOST is reachable '
+            + 'from the bot. With Docker Compose, use host.docker.internal for a provider '
+            + 'running on the host; Ollama must listen on a network-accessible interface.',
+        );
     }
     return models[0];
 }

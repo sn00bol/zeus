@@ -12,14 +12,13 @@ module.exports = {
         const summary = getStatusSummary(status);
         const report = [
             `**⚡ ZEUS ${summary.version}**`,
-            'Host AI agent status',
-            `**Model:** \`${summary.provider}/${summary.model}\``,
-            `**Tokens:** ${summary.inputTokens} in / ${summary.outputTokens} out`,
-            `**Cache:** ${summary.cache}`,
-            `**Context:** ${summary.context}`,
-            `**Session:** ${summary.sessionName} · ${summary.sessionUpdated}`,
-            `**Queue:** ${summary.queue.collecting ? 'collecting' : 'idle'} · depth ${summary.queue.queue_depth || 0}`,
-            `**Database:** ${state.databasesReady ? 'ready' : 'not ready'} · **Bot:** ${state.isShuttingDown ? 'shutting down' : 'active'}`,
+            `**🧠 Model:** \`${summary.provider}/${summary.model}\``,
+            `**🧮 Tokens:** ${summary.inputTokens} in / ${summary.outputTokens} out`,
+            `**📚 Cache:** ${summary.cache}`,
+            `**📚 Context:** ${summary.context}`,
+            `**🧵 Session:** ${summary.sessionName} · ${summary.sessionUpdated}`,
+            `**🪢 Queue:** ${summary.queue.collecting ? 'collecting' : 'idle'} · depth ${summary.queue.queue_depth || 0}`,
+            `**🔹 Database:** ${state.databasesReady ? 'ready' : 'not ready'} · **Bot:** ${state.isShuttingDown ? 'shutting down' : 'active'}`,
         ].join('\n');
         await sendFormattedMessage(ctx, report);
     },

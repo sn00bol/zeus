@@ -35,7 +35,7 @@
 - Discord/telegram bot token
 
 ### Install and run
-1. Get the source code and create the local environment file:
+1. Get the source code:
 ```bash
 git clone https://github.com/sn00bol/zeus.git
 cd zeus
@@ -47,24 +47,10 @@ python setup.py
 ```
 This script run both `pip install` and `npm install`, so you dont have to install dependencies single of them (and get fail lol)
 
-3. Build and run the container:
+3. Build and run bot container:
 ```bash
 docker compose up --build -d
 ```
-
-Choose the platform in `.env` with `PLATFORM=discord` or `PLATFORM=telegram`.
-The same generic npm scripts select that platform automatically:
-```bash
-npm start
-npm run dev
-npm run register-commands
-npm run healthcheck
-```
-
-Platform-independent command loading, agent conversations, model/session
-operations, status summaries, token formatting, and retry handling live in
-`platform/shared/`. `platform/index.js` dispatches startup from `PLATFORM`;
-platform adapters remain thin for their native interactions, threads, and APIs.
 
 Now your bot is alive and enjoy!
 

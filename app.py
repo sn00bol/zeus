@@ -154,6 +154,10 @@ def _require_docker_engine(docker: str) -> None:
         raise RuntimeError(message)
 
 
+def _uses_managed_database() -> bool:
+    return os.environ.get("ZEUS_MANAGED_DATABASE", "").strip().lower() == "true"
+
+
 def run_platform(*, name: str, record_logs: bool = False) -> int:
     token = os.environ.get(f"{name.upper()}_BOT_API_KEY" if name == "discord" else "TELEGRAM_BOT_API_KEY", "")
     if not token or token == "YOUR_BOT_TOKEN":
@@ -169,17 +173,22 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
     if not os.environ.get("DB_PASSWORD"):
         raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
 
-    docker = shutil.which("docker")
-    if docker is None:
-        raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
-    _require_docker_engine(docker)
+    managed_database = _uses_managed_database()
+    docker = None
+    if not managed_database:
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
+        _require_docker_engine(docker)
 
     port = int(os.environ.get("BRIDGE_PORT", "5000"))
     bridge: subprocess.Popen[str] | None = None
     bot: subprocess.Popen[str] | None = None
     recorder = _RunLogRecorder() if record_logs else None
     try:
-        if recorder:
+        if managed_database:
+            print("Using PostgreSQL provided by the container orchestrator.")
+        elif recorder:
             recorder.record("Starting the shared PostgreSQL database.")
             compose = subprocess.run(
                 [docker, "compose", "up", "-d", "--wait", "postgres"],
@@ -196,7 +205,7 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
                 recorder.record(compose.stderr.rstrip())
             if compose.returncode:
                 raise subprocess.CalledProcessError(compose.returncode, compose.args)
-        else:
+        elif not managed_database:
             print("Starting the shared PostgreSQL database...")
             subprocess.run(
                 [docker, "compose", "up", "-d", "--wait", "postgres"],
@@ -208,7 +217,7 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
         if recorder:
             bridge_options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                   encoding="utf-8", errors="replace", bufsize=1)
-        # For now, both use the same discord_bridge (you can create a telegram_bridge later)
+        # Both platform adapters use the shared inference bridge.
         bridge = subprocess.Popen([sys.executable, "-m", f"src.{name}_bridge"], **bridge_options)
         if recorder and bridge.stdout:
             recorder.attach("bridge", bridge.stdout, show_startup=True)
@@ -273,7 +282,7 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
 
 
 def main() -> int:
-    if not (ROOT / ".env").exists():
+    if not (ROOT / ".env").exists() and not _uses_managed_database():
         raise RuntimeError("Missing .env. Run `python setup.py` first.")
     platform = os.environ.get("PLATFORM", "discord").strip().lower()
     if platform == "discord":

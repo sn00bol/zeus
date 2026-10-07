@@ -5,6 +5,7 @@ const { registerCommandHandlers, loadCommands } = require('./handlers/commandHan
 const { connectData } = require('./handlers/databaseHandler');
 const { createHealthcheckServer } = require('./handlers/healthcheckHandler');
 const { registerShutdownHandlers } = require('./handlers/lifecycleHandler');
+const { synchronizeTelegramCommands } = require('./scripts/registerCommands');
 
 const bot = createTelegramClient();
 const state = {
@@ -27,8 +28,9 @@ const shutdown = registerShutdownHandlers({
     dbmanager,
 });
 
-connectData(bot, state, dbmanager).then(() => {
+connectData(bot, state, dbmanager).then(async () => {
     if (!state.isShuttingDown) {
+        await synchronizeTelegramCommands(bot.telegram, bot.commands);
         bot.launch({}, () => {
             state.botReady = true;
             console.log(`[LOGIN] Telegram bot @${bot.botInfo.username} authenticated.`);
@@ -42,4 +44,11 @@ connectData(bot, state, dbmanager).then(() => {
             });
         });
     }
+}).catch(error => {
+    console.error('[STARTUP] Telegram bot initialization failed:', error);
+    process.exitCode = 1;
+    shutdown('Telegram initialization failed').catch(shutdownError => {
+        console.error('[SHUTDOWN] Failed after Telegram initialization error:', shutdownError);
+        process.exitCode = 1;
+    });
 });

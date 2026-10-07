@@ -15,3 +15,27 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+  zeus:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${ZEUS_IMAGE:-zeus:local}
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ZEUS_MANAGED_DATABASE: "true"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      LLM_HOST: ${ZEUS_LLM_HOST:-host.docker.internal}
+      ENABLE_DOCKER_HEALTHCHECK: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "platform/scripts/healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

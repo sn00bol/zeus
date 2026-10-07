@@ -28,7 +28,5 @@ Database
 - Graceful degradation when PostgreSQL is unavailable
 
 TODOS:
-- Add adding bot token, prefix when using setup.py
-- Reduce logs
-- If user dont add any prefix then bot WILL only use slash commands
-- Bot respond kinda slow
+- Add options to build with docker for setup.py
+- Make setup.py more advance

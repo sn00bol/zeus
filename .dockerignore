@@ -1,5 +1,7 @@
 .env
 .envrc
+.git
+.github
 .venv
 env/
 venv/
@@ -14,7 +16,9 @@ __pycache__/
 database/*.db*
 database/postgres/
 database/history.json
+logs/
 test/
+tests/
 **/*.test.js
 **/*.test.cjs
 .backups/
