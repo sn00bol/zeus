@@ -1,17 +1,13 @@
-const fs = require('fs');
-const path = require('path');
+const path = require('node:path');
 const { ChannelType, Collection } = require('discord.js');
-const { performance } = require('node:perf_hooks');
 const { isOwner } = require('../utils/permission');
+const { loadCommands: loadPlatformCommands } = require('../../shared/handlers/commandLoader');
 const {
     createChatThread,
     getPromptWithoutBotMention,
     respondInChatThread,
 } = require('../utils/chatThreads');
 
-// Avoid requiring helper/data modules; command modules declare both fields at the top level.
-const COMMAND_NAME_DECLARATION = /^[\t ]{0,12}name\s*:/m;
-const COMMAND_EXECUTE_DECLARATION = /^[\t ]{0,12}(?:async\s+)?execute\s*(?:\(|:)/m;
 async function startMentionChat(client, message, prompt) {
     if (!prompt) {
         await message.reply({
@@ -37,69 +33,13 @@ async function startMentionChat(client, message, prompt) {
     }
 }
 
-function getCommandFiles(dir, stats) {
-    if (!fs.existsSync(dir)) return [];
-
-    const results = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            results.push(...getCommandFiles(fullPath, stats));
-        } else if (entry.isFile() && entry.name.endsWith('.js')) {
-            stats.scanned++;
-            try {
-                const source = fs.readFileSync(fullPath, 'utf8');
-                if (COMMAND_NAME_DECLARATION.test(source) && COMMAND_EXECUTE_DECLARATION.test(source)) {
-                    results.push(fullPath);
-                } else {
-                    stats.filtered++;
-                }
-            } catch (error) {
-                stats.failed++;
-                console.error(`[COMMAND] Failed to inspect ${fullPath}:`, error);
-            }
-        }
-    }
-    return results;
-}
-
 function loadCommands(client) {
-    const startedAt = performance.now();
-    client.commands = new Collection();
-    client.aliases = new Collection();
     client.blockedCommands = new Set();
-    const stats = { scanned: 0, filtered: 0, failed: 0, loaded: 0 };
-
-    for (const folder of ['commands']) {
-        const folderPath = path.join(__dirname, '..', folder);
-        for (const filePath of getCommandFiles(folderPath, stats)) {
-            try {
-                const command = require(filePath);
-                if (!command || typeof command !== 'object' ||
-                    typeof command.name !== 'string' ||
-                    typeof command.execute !== 'function') {
-                    continue;
-                }
-
-                stats.loaded++;
-                client.commands.set(command.name, command);
-                if (!Array.isArray(command.aliases)) continue;
-
-                for (const rawAlias of command.aliases) {
-                    const alias = String(rawAlias).toLowerCase();
-                    if (alias && !client.commands.has(alias) && !client.aliases.has(alias)) {
-                        client.aliases.set(alias, command);
-                    }
-                }
-            } catch (error) {
-                stats.failed++;
-                console.error(`[COMMAND] Failed to load command file ${filePath}:`, error);
-            }
-        }
-    }
-
-    const elapsedMs = (performance.now() - startedAt).toFixed(1);
-    // console.log(`[COMMAND] Loaded ${stats.loaded} commands; scanned ${stats.scanned} files, ` +`filtered ${stats.filtered}, failed ${stats.failed}, in ${elapsedMs}ms.`);
+    return loadPlatformCommands(client, {
+        directory: path.join(__dirname, '..', 'commands'),
+        collectionFactory: () => new Collection(),
+        platform: 'DISCORD',
+    });
 }
 
 async function runCommand(client, command, context, args) {

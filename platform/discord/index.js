@@ -1,7 +1,7 @@
 // RUNNING BOT: npm run start (for regular use) or npm run dev (with nodemon for auto-restart on changes)
 
 require('dotenv').config();
-const dbmanager = require('./database/dbmanager');
+const dbmanager = require('../shared/database/dbmanager');
 const { createDiscordClient } = require('./handlers/clientHandler');
 const { registerCommandHandlers } = require('./handlers/commandHandler');
 const { connectData } = require('./handlers/databaseHandler');

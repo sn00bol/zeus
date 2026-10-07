@@ -1,4 +1,4 @@
-const { requestJson } = require('../utils/agentBridge');
+const { resetConversation } = require('../../shared/utils/sessionCommands');
 
 module.exports = {
     name: 'reset',
@@ -16,10 +16,7 @@ module.exports = {
             await message.reply('This thread is not a ZEUS chat thread.');
             return;
         }
-        const result = await requestJson('/sessions/reset', {
-            method: 'POST',
-            body: { platform: 'discord', conversation_id: message.channelId },
-        });
+        const result = await resetConversation('discord', message.channelId);
         await message.reply(result.reset
             ? 'This thread’s conversation and usage have been reset. Long-term memory is unchanged.'
             : 'No session was found for this thread.');

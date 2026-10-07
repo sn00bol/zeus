@@ -1,8 +1,8 @@
 require('dotenv').config();
 
-const fs = require('fs');
 const path = require('path');
 const { Collection, REST, Routes } = require('discord.js');
+const { loadCommands: loadSharedCommands } = require('../../shared/handlers/commandLoader');
 const {
     buildSlashCommand,
     getSlashCommandSignature,
@@ -11,34 +11,14 @@ const {
 } = require('../utils/slashCommand');
 const { retryWithBackoff } = require('../utils/retry');
 
-function getFilesRecursive(dir) {
-    if (!fs.existsSync(dir)) return [];
-
-    const results = [];
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            results.push(...getFilesRecursive(fullPath));
-        } else if (entry.isFile() && entry.name.endsWith('.js')) {
-            results.push(fullPath);
-        }
-    }
-    return results;
-}
-
 function loadCommands(rootDir, folders = ['commands']) {
     const commands = new Collection();
     for (const folder of folders) {
-        for (const filePath of getFilesRecursive(path.join(rootDir, folder))) {
-            try {
-                const command = require(filePath);
-                if (command && typeof command.name === 'string' && typeof command.execute === 'function') {
-                    commands.set(command.name, command);
-                }
-            } catch (error) {
-                console.error(`Failed to load command file ${filePath}:`, error);
-            }
-        }
+        loadSharedCommands({ commands, aliases: new Collection() }, {
+            directory: path.join(rootDir, folder),
+            collectionFactory: () => commands,
+            platform: 'DISCORD SLASH',
+        });
     }
     return { commands };
 }

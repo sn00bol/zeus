@@ -2,30 +2,30 @@
   <strong>ZEUS Platform notes</strong>
 </p>
 
-# Telegram platform
-
-# Discord platform
-
 If you're planning to add commands, develop features, or debug the bot, running it directly with Node.js is recommended
-
-Chat and maintenance commands are prefix commands. Use `Znew [prompt]` to
-start a public thread, `Zreset` to clear its current history, `Zretry` to retry
-the last unanswered prompt, `Zusage` and `Zstatus` to inspect usage, and
-`Zhome` / `Zhome clear` to configure the server's mention channel. `Zrestart`
-and `Zstop` are owner-only and require starting ZEUS through `python app.py`;
-set one or more comma-separated Discord user IDs in `OWNER_ID`.
 
 The current `compose.yaml` runs PostgreSQL only. Bot restarts are handled by
 the host supervisor and do not build or pull an application image.
 
-traditional `npm run`, there three ways to use it:
+Run the selected platform with the same scripts:
 ```
-npm run start  # Fast testing
+npm start      # Start the platform configured in .env
 
-npm run dev    # Allow to restart bot via save file
+npm run dev    # Restart on file changes
 
-npm run test   # test if it's bugging or not
+npm test       # Run the test suite
 ```
+
+Platform commands:
+```bash
+npm run register-commands  # Uses PLATFORM from .env to sync the command menu
+npm run healthcheck         # Check the local bot health endpoint
+```
+
+The health endpoint is enabled with `ENABLE_DOCKER_HEALTHCHECK=true` and
+defaults to `127.0.0.1:3000/health`. Override its bind address with
+`HEALTHCHECK_HOST` and port with `HEALTHCHECK_PORT`. It reports ready only after
+the database is initialized and the selected platform authenticates.
 
 Cautions:
 `npm run test` only run like this: 
@@ -48,4 +48,4 @@ PS D:\zeus>
 To more advance test, please create `/test` folder and its `*.test.js` file for more advance
 
 ## LICENSE
-ZEUS Platform is based on Santaa v1.3.0 Debloat Version and built in Telegram bot and is using Apache-2.0 License, see [LICENSE](https://github.com/sn00bol/De-santaa/blob/main/LICENSE) for more details
+ZEUS Platform is based on Santaa v1.3.0 Debloat Version with built in Telegram platform and is using Apache-2.0 License, see [LICENSE](https://github.com/sn00bol/De-santaa/blob/main/LICENSE) for more details

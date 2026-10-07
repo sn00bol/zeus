@@ -1,8 +1,11 @@
-const { requestJson } = require('../utils/agentBridge');
+const {
+    getAvailableModels,
+    setModelToAutomatic,
+    setPreferredModel,
+} = require('../../shared/utils/modelService');
 const { getModelScope } = require('../utils/agentConversation');
 const { replyToCommand } = require('../utils/commandInteraction');
 
-const PROVIDERS = new Set(['ollama', 'lmstudio', 'llamacpp']);
 const ACTIONS = new Set(['list', 'set', 'auto']);
 
 function getOptions(context, args) {
@@ -41,12 +44,14 @@ module.exports = {
             const user = context.user || context.author;
             const scopeId = getModelScope(context.guildId || context.guild?.id, user.id);
             if (action === 'list') {
-                const { models } = await requestJson('/models');
+                const { models, preference: current } = await getAvailableModels(
+                    context.client.db,
+                    scopeId,
+                );
                 if (!models.length) {
                     await replyToCommand(context, 'No local AI models are available. Start a provider and load a model.');
                     return;
                 }
-                const current = await context.client.db.getModelPreference(scopeId);
                 const lines = models.map(item => {
                     const selected = current?.provider === item.provider
                         && current?.model === item.model ? ' **(selected)**' : '';
@@ -70,24 +75,30 @@ module.exports = {
             }
 
             if (action === 'auto') {
-                await context.client.db.setModelPreference(scopeId, null, null);
+                await setModelToAutomatic(context.client.db, scopeId);
                 await replyToCommand(context, 'Automatic model selection enabled. ZEUS will scan local providers and use the first available model for each new chat response.');
                 return;
             }
 
-            if (!PROVIDERS.has((provider || '').toLowerCase()) || !model) {
+            if (!model) {
                 await replyToCommand(context, 'To select a model, provide both provider and exact model ID. Example: `/model set provider:ollama model:llama3`.');
                 return;
             }
-            const normalizedProvider = provider.toLowerCase();
-            const { models } = await requestJson('/models');
-            const selected = models.find(item => item.provider === normalizedProvider && item.model === model);
-            if (!selected) {
-                await replyToCommand(context, `Model \`${model}\` was not found under \`${normalizedProvider}\`. Run \`/model list\` to see loaded local models.`);
+            const result = await setPreferredModel(
+                context.client.db,
+                scopeId,
+                provider,
+                model,
+            );
+            if (result.reason === 'invalid-selection') {
+                await replyToCommand(context, 'To select a model, provide both provider and exact model ID. Example: `/model set provider:ollama model:llama3`.');
                 return;
             }
-            await context.client.db.setModelPreference(scopeId, selected.provider, selected.model);
-            await replyToCommand(context, `ZEUS will use \`${selected.model}\` from \`${selected.provider}\` for new responses in this ${context.guildId || context.guild ? 'server' : 'DM'}.`);
+            if (!result.selected) {
+                await replyToCommand(context, `Model \`${model}\` was not found under \`${provider.toLowerCase()}\`. Run \`/model list\` to see loaded local models.`);
+                return;
+            }
+            await replyToCommand(context, `ZEUS will use \`${result.selected.model}\` from \`${result.selected.provider}\` for new responses in this ${context.guildId || context.guild ? 'server' : 'DM'}.`);
         } catch (error) {
             console.error('[MODEL] Failed to update model selection:', error);
             await replyToCommand(context, `Could not update model selection: ${error.message}`);

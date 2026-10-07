@@ -16,7 +16,7 @@ module.exports = {
             method: 'POST',
             body: { action: 'restart' },
         });
-        await message.reply('Restart requested. I will reconnect shortly.');
+        await message.reply('Restart requested. Begin restarting... Done!');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();
     },
 };

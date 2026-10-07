@@ -1,4 +1,4 @@
-const { requestJson } = require('../utils/agentBridge');
+const { getRetryPrompt } = require('../../shared/utils/sessionCommands');
 const { respondInChatThread } = require('../utils/chatThreads');
 
 module.exports = {
@@ -18,9 +18,7 @@ module.exports = {
             return;
         }
 
-        const { message: failedMessage } = await requestJson(
-            `/sessions/retry?platform=discord&conversation_id=${encodeURIComponent(message.channelId)}`,
-        );
+        const { message: failedMessage } = await getRetryPrompt('discord', message.channelId);
         if (!failedMessage?.content || !failedMessage.message_id) {
             await message.reply('There is no unanswered prompt to retry in this thread.');
             return;

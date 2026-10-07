@@ -251,6 +251,28 @@ async function getHomeChannel(guildId) {
     return rows[0]?.home_channel_id || null;
 }
 
+async function setTelegramHomeChat(chatId) {
+    if (chatId === null) {
+        await pool.query('DELETE FROM telegram_home_chat WHERE setting_id = 1');
+        return null;
+    }
+    const { rows } = await pool.query(`
+        INSERT INTO telegram_home_chat (setting_id, chat_id)
+        VALUES (1, $1)
+        ON CONFLICT (setting_id) DO UPDATE
+        SET chat_id = EXCLUDED.chat_id, updated_at = NOW()
+        RETURNING chat_id
+    `, [String(chatId)]);
+    return rows[0]?.chat_id || null;
+}
+
+async function getTelegramHomeChat() {
+    const { rows } = await pool.query(
+        'SELECT chat_id FROM telegram_home_chat WHERE setting_id = 1',
+    );
+    return rows[0]?.chat_id || null;
+}
+
 async function close() {
     if (initialization) await initialization.catch(() => {});
     initialization = undefined;
@@ -279,6 +301,8 @@ const database = {
     setModelPreference,
     setHelpPreference,
     setHomeChannel,
+    getTelegramHomeChat,
+    setTelegramHomeChat,
     resetSession,
     upsertSession,
     updateSessionStatus,

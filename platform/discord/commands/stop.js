@@ -16,7 +16,7 @@ module.exports = {
             method: 'POST',
             body: { action: 'stop' },
         });
-        await message.reply('Safe shutdown requested. The Discord bot and AI bridge will stop.');
+        await message.reply('Safe shutdown requested. The bot will stop shortly, have a good day!');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();
     },
 };

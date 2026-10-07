@@ -1,10 +1,5 @@
-const { requestJson } = require('../utils/agentBridge');
-
-function formatTokens(value) {
-    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}m`;
-    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-    return String(value);
-}
+const { getConversationUsage } = require('../../shared/utils/sessionCommands');
+const { formatTokens } = require('../../shared/utils/tokenFormat');
 
 module.exports = {
     name: 'usage',
@@ -18,9 +13,7 @@ module.exports = {
             await message.reply('Run `usage` inside a ZEUS chat thread.');
             return;
         }
-        const usage = await requestJson(
-            `/sessions/usage?platform=discord&conversation_id=${encodeURIComponent(message.channelId)}`,
-        );
+        const usage = await getConversationUsage('discord', message.channelId);
         await message.reply(
             `Session usage: **${formatTokens(usage.prompt_tokens)} input** / `
             + `**${formatTokens(usage.completion_tokens)} output** tokens.`,

@@ -154,15 +154,18 @@ def _require_docker_engine(docker: str) -> None:
         raise RuntimeError(message)
 
 
-def run_discord(*, record_logs: bool = False) -> int:
-    token = os.environ.get("DISCORD_BOT_API_KEY", "")
+def run_platform(*, name: str, record_logs: bool = False) -> int:
+    token = os.environ.get(f"{name.upper()}_BOT_API_KEY" if name == "discord" else "TELEGRAM_BOT_API_KEY", "")
     if not token or token == "YOUR_BOT_TOKEN":
-        raise RuntimeError("Set DISCORD_BOT_API_KEY in .env before starting Discord.")
-    if not os.environ.get("PFX") or os.environ["PFX"] == "YOUR_BOT_PREFIX":
-        raise RuntimeError("Set PFX in .env before starting Discord.")
+        raise RuntimeError(f"Set the API key in .env before starting {name}.")
+    
+    if name == "discord":
+        if not os.environ.get("PFX") or os.environ["PFX"] == "YOUR_BOT_PREFIX":
+            raise RuntimeError("Set PFX in .env before starting Discord.")
+
     node = shutil.which("node")
     if node is None:
-        raise RuntimeError("Node.js is required to start the Discord platform.")
+        raise RuntimeError("Node.js is required to start the platform.")
     if not os.environ.get("DB_PASSWORD"):
         raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
 
@@ -205,7 +208,8 @@ def run_discord(*, record_logs: bool = False) -> int:
         if recorder:
             bridge_options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                   encoding="utf-8", errors="replace", bufsize=1)
-        bridge = subprocess.Popen([sys.executable, "-m", "src.discord_bridge"], **bridge_options)
+        # For now, both use the same discord_bridge (you can create a telegram_bridge later)
+        bridge = subprocess.Popen([sys.executable, "-m", f"src.{name}_bridge"], **bridge_options)
         if recorder and bridge.stdout:
             recorder.attach("bridge", bridge.stdout, show_startup=True)
         _wait_for_bridge(bridge, port)
@@ -213,17 +217,17 @@ def run_discord(*, record_logs: bool = False) -> int:
             recorder.health_log_received.wait(timeout=1)
         bot_environment = os.environ.copy()
         bot_environment["ZEUS_SUPERVISED"] = "1"
-        bot_command = [node, str(ROOT / "platform" / "discord" / "index.js")]
+        bot_command = [node, str(ROOT / "platform" / name / "index.js")]
         bot_options: dict[str, object] = {"cwd": ROOT, "env": bot_environment}
         if recorder:
             bot_options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                encoding="utf-8", errors="replace", bufsize=1)
         bot = subprocess.Popen(bot_command, **bot_options)
         if recorder and bot.stdout:
-            recorder.attach("discord", bot.stdout)
+            recorder.attach(name, bot.stdout)
         if recorder:
-            recorder.record("ZEUS Discord platform is running.")
-        print("ZEUS Discord platform is running. Press Ctrl+C to stop.")
+            recorder.record(f"ZEUS {name} platform is running.")
+        print(f"ZEUS {name} platform is running. Press Ctrl+C to stop.")
         while True:
             if bridge.poll() is not None:
                 raise RuntimeError(f"The inference bridge exited (code {bridge.returncode}).")
@@ -238,14 +242,14 @@ def run_discord(*, record_logs: bool = False) -> int:
                 return 0
             if action == "restart":
                 if recorder:
-                    recorder.record("Received restart request; restarting the Discord bot.")
+                    recorder.record(f"Received restart request; restarting the {name} bot.")
                 else:
-                    print("Received restart request; restarting the Discord bot.")
+                    print(f"Received restart request; restarting the {name} bot.")
                 if not _wait_for_exit(bot):
                     _stop_process(bot)
                 bot = subprocess.Popen(bot_command, **bot_options)
                 if recorder and bot.stdout:
-                    recorder.attach("discord", bot.stdout)
+                    recorder.attach(name, bot.stdout)
                 continue
             bot_code = bot.poll()
             if bot_code is not None:
@@ -280,9 +284,10 @@ def main() -> int:
             help="save process logs on shutdown while keeping the console quiet",
         )
         args = parser.parse_args()
-        return run_discord(record_logs=args.logs)
+        return run_platform(name="discord", record_logs=args.logs)
     if platform == "telegram":
-        raise RuntimeError("Telegram platform is not implemented yet.")
+        return run_platform(name="telegram", record_logs=False)
+    raise RuntimeError(f"Unsupported PLATFORM '{platform}' in .env.")
     raise RuntimeError(f"Unsupported PLATFORM '{platform}' in .env.")
 
 

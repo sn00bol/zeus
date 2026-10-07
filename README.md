@@ -1,7 +1,3 @@
-<p align="center">
-  <img width="300" height="300" alt="Santaa Bot Logo" src="https://github.com/user-attachments/assets/1804bf80-6b57-4d55-8345-a3eb55386cb1" />
-</p>
-
 <div align="center">
 <img width="150" height="150" alt="Basda Logo" src="assets/Basda.png" />
   <p>A self-hosting AI Agent for Discord, Telegram</p>
@@ -51,57 +47,24 @@ python setup.py
 ```
 This script run both `pip install` and `npm install`, so you dont have to install dependencies single of them (and get fail lol)
 
-3. Start the app while Docker Desktop is ready:
+3. Build and run the container:
 ```bash
-python app.py
+docker compose up --build -d
 ```
-Add `--logs` to keep Discord and bridge logs out of the console while running:
+
+Choose the platform in `.env` with `PLATFORM=discord` or `PLATFORM=telegram`.
+The same generic npm scripts select that platform automatically:
 ```bash
-python app.py --logs
+npm start
+npm run dev
+npm run register-commands
+npm run healthcheck
 ```
-With this option, only bridge startup/health lines and the ZEUS ready message
-are shown. Full process logs are saved under `logs/` when ZEUS shuts down.
 
-In Discord, run `/model list` to scan local Ollama, LM Studio, and llama.cpp
-providers, `/model set` with an exact provider/model pair to select one for
-the current server (or DM user), or `/model auto` to scan again and select the
-first loaded model for each new answer. Mention ZEUS with a prompt in a server
-text channel (for example, `@ZEUS do you know Napoleon?`) to create a thread
-from that message and get an immediate answer. Continue chatting by sending
-messages in the thread. ZEUS responds only in public threads it created from a
-mention; there is no separate `/chat` command.
-
-Shared application services are in `core/`. Provider adapters remain under
-`src/provider/`; the core model manager handles provider/model discovery,
-short-lived model caching, optional provider API tokens, and common request
-context. Conversation sessions and message history are persisted in the shared
-PostgreSQL database.
-
-Optional backend credentials can be set with `OLLAMA_API_KEY`,
-`LMSTUDIO_API_KEY`, or `LLAMACPP_API_KEY`; `ZEUS_MODEL_TOKEN` is the shared
-fallback. Credentials are sent as bearer tokens and are not stored with chat
-history.
-
-ZEUS also keeps short-term cross-thread memory for each user and platform. It
-stores recent question/answer pairs, retrieves only text relevant to the next
-question, and deletes memories after 30 days without being recalled. Memory
-content is scoped to its owner and can be cleared for a user through the
-`MemoryStore.forget_user` core service.
-
-In ZEUS chat threads, `Zreset` clears that thread's history and token totals
-without deleting long-term memory; `Zretry` retries its last unanswered
-prompt; `Zusage` and `Zstatus` show usage and runtime status. `Znew [prompt]`
-creates another public chat thread. Server managers can use `Zhome` to restrict
-new bot mentions to the current text channel or `Zhome clear` to remove that
-restriction. Configure comma-separated `OWNER_ID` values for `Zrestart` and
-`Zstop`; those two commands require starting through `python app.py`.
-
-The current Compose setup contains only PostgreSQL; the Discord bot and AI
-bridge run as host processes. Consequently `Zrestart` restarts the supervised
-Discord process but does not rebuild a ZEUS Docker image. `python -m core.version`
-prints the release version with a short Git commit suffix when Git metadata is
-available; Docker image tagging will take effect once the app is added as a
-Compose build service.
+Platform-independent command loading, agent conversations, model/session
+operations, status summaries, token formatting, and retry handling live in
+`platform/shared/`. `platform/index.js` dispatches startup from `PLATFORM`;
+platform adapters remain thin for their native interactions, threads, and APIs.
 
 Now your bot is alive and enjoy!
 

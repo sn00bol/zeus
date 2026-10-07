@@ -93,3 +93,9 @@ CREATE TABLE IF NOT EXISTS discord_guild_settings (
     home_channel_id TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS telegram_home_chat (
+    setting_id SMALLINT PRIMARY KEY CHECK (setting_id = 1),
+    chat_id TEXT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

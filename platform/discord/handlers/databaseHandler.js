@@ -1,16 +1,9 @@
+const { initializeDatabase } = require('../../shared/handlers/databaseHandler');
 const { retryWithBackoff } = require('../utils/retry');
 
 async function connectData(client, state, db) {
     try {
-        await db.init();
-
-        if (state.isShuttingDown) {
-            await db.close();
-            return;
-        }
-
-        client.db = db;
-        state.databasesReady = true;
+        if (!await initializeDatabase(client, state, db)) return;
 
         await retryWithBackoff(async () => {
             const token = process.env.DISCORD_BOT_API_KEY;
