@@ -28,5 +28,8 @@ Database
 - Graceful degradation when PostgreSQL is unavailable
 
 TODOS:
-- Add options to build with docker for setup.py
-- Make setup.py more advance
+- Make webui using it own bridge (currently use platform bridge lo)
+- Add random text for fun when start new chat
+- Improving webui and menu bar, format text
+- Add ZEUS Webui settings, model selection more advance
+- Add search, pin, support image/file,... (and no limits)

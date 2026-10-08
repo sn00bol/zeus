@@ -3,6 +3,7 @@
   "scripts": {
     "start": "node platform/index.js",
     "dev": "nodemon platform/index.js",
+    "webui": "node webui/app.js",
     "register-commands": "node platform/scripts/registerCommands.js",
     "slash-register": "node platform/scripts/registerCommands.js",
     "slash-reset": "node platform/scripts/registerCommands.js --reset",

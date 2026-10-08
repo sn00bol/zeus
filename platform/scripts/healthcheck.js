@@ -1,6 +1,47 @@
+const http = require('node:http');
 require('dotenv').config({ path: require('node:path').join(__dirname, '..', '..', '.env') });
 
-const { checkHealth } = require('../telegram/scripts/healthcheck');
+function checkEndpoint(port, expectedBody = 'ready') {
+    return new Promise((resolve, reject) => {
+        const request = http.get({
+            host: process.env.HEALTHCHECK_HOST || '127.0.0.1',
+            port,
+            path: '/health',
+        }, response => {
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk));
+            response.on('error', reject);
+            response.on('end', () => {
+                const body = Buffer.concat(chunks).toString('utf8').trim();
+                if (response.statusCode !== 200 || body !== expectedBody) {
+                    reject(new Error(
+                        `Healthcheck failed on port ${port} (${response.statusCode || 'no status'}): ${body || 'empty response'}`,
+                    ));
+                    return;
+                }
+                resolve(body);
+            });
+        });
+        request.setTimeout(3_000, () => {
+            request.destroy(new Error(`Healthcheck timed out on port ${port}.`));
+        });
+        request.on('error', reject);
+    });
+}
+
+function checkHealth() {
+    const selected = (process.env.PLATFORM || 'webui')
+        .split(',')
+        .map(platform => platform.trim().toLowerCase())
+        .filter(Boolean);
+    if (!selected.includes('webui')) selected.unshift('webui');
+    const checks = [
+        checkEndpoint(Number(process.env.WEBUI_PORT) || 3000),
+    ];
+    const bot = selected.find(platform => platform === 'discord' || platform === 'telegram');
+    if (bot) checks.push(checkEndpoint(Number(process.env.HEALTHCHECK_PORT) || 3001));
+    return Promise.all(checks);
+}
 
 if (require.main === module) {
     checkHealth().then(() => {
@@ -11,4 +52,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { checkHealth };
+module.exports = { checkHealth, checkEndpoint };

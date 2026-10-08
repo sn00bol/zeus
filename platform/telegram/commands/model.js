@@ -1,6 +1,7 @@
 const { getModelScope } = require('../utils/agent/agentConversation');
 const { sendFormattedMessage } = require('../utils/formatter');
 const {
+    getEnvironmentModelSelection,
     getAvailableModels,
     setModelToAutomatic,
     setPreferredModel,
@@ -30,9 +31,11 @@ module.exports = {
                     return;
                 }
 
+                const configured = current ? null : getEnvironmentModelSelection(models);
+                const effective = current || configured;
                 const lines = models.map(item => {
-                    const selected = current?.provider === item.provider
-                        && current?.model === item.model ? ' (selected)' : '';
+                    const selected = effective?.provider === item.provider
+                        && effective?.model === item.model ? ' (selected)' : '';
                     return `• \`${item.provider}\` — \`${item.model}\`${selected}`;
                 });
                 const visibleLines = [];
@@ -46,8 +49,8 @@ module.exports = {
                     visibleLines.push(`…and ${lines.length - visibleLines.length} more.`);
                 }
                 const mode = current?.provider
-                    ? `Selected: \`${current.provider}/${current.model}\``
-                    : 'Selection: automatic';
+                    ? `Selected for this user: \`${current.provider}/${current.model}\``
+                    : `Default from .env: \`${effective.provider}/${effective.model}\``;
                 await sendFormattedMessage(
                     ctx,
                     `**Available local models**\n${visibleLines.join('\n')}\n\n${mode}`,
@@ -57,7 +60,7 @@ module.exports = {
 
             if (action === 'auto') {
                 await setModelToAutomatic(bot.db, scopeId);
-                await ctx.reply('Automatic model selection enabled. ZEUS will use the first available local model for new responses.');
+                await ctx.reply('The per-user model override was cleared. ZEUS will now follow ZEUS_PROVIDER and ZEUS_MODEL from .env.');
                 return;
             }
 

@@ -242,6 +242,44 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         await manager.resolve(request)
         self.assertEqual(provider.list_calls, 2)
 
+    async def test_configured_model_is_used_when_request_has_no_model(self) -> None:
+        provider = FakeProvider()
+        manager = ModelManager(provider_factory=lambda _: provider)
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model=None,
+            messages=[SimpleNamespace(role="user", content="hello")],
+            personality=None,
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        with patch.dict(os.environ, {"ZEUS_MODEL": "configured-model"}):
+            context = await manager.resolve(request)
+
+        self.assertEqual(context.model_name, "configured-model")
+        self.assertEqual(provider.list_calls, 0)
+
+    async def test_automatic_model_setting_uses_runtime_discovery(self) -> None:
+        provider = FakeProvider()
+        manager = ModelManager(provider_factory=lambda _: provider)
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model=None,
+            messages=[SimpleNamespace(role="user", content="hello")],
+            personality=None,
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        with patch.dict(os.environ, {"ZEUS_MODEL": "automatic"}):
+            context = await manager.resolve(request)
+
+        self.assertEqual(context.model_name, "llama-test")
+        self.assertEqual(provider.list_calls, 1)
+
     async def test_memory_is_added_to_context_without_replacing_personality(self) -> None:
         provider = FakeProvider()
         database = FakeMemoryDatabase()

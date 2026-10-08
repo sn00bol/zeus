@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import re
 import secrets
 import shutil
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -21,10 +24,7 @@ PROVIDERS = {
     "llamacpp": {"host": "localhost", "port": 8080, "desc": "llama.cpp HTTP Server"},
 }
 
-PLATFORMS = {
-    "1": ("discord", "Discord Bot Interface"),
-    "2": ("telegram", "Telegram Bot Interface (Experimental)"),
-}
+OPTIONAL_PLATFORMS = ("discord", "telegram")
 
 # ==========================================
 # UI Styling & Helpers
@@ -140,31 +140,239 @@ def npm_install_command() -> list[str]:
 # ==========================================
 # Interactive Prompt Helpers
 # ==========================================
-def choose_platform(input_fn: Callable[[str], str]) -> str:
-    print_step("Select Target Platform")
-    for key, (name, desc) in PLATFORMS.items():
-        print(f"  [{Colors.BOLD}{key}{Colors.RESET}] {name.capitalize():<10} {Colors.DIM}({desc}){Colors.RESET}")
-    
+def _read_menu_key() -> str:
+    if sys.platform == "win32":
+        import msvcrt
+
+        key = msvcrt.getwch()
+        if key in {"\x00", "\xe0"}:
+            key = msvcrt.getwch()
+            return {"H": "up", "P": "down"}.get(key, "")
+        return {"\r": "enter", "\x03": "interrupt", " ": "space"}.get(key, "")
+
+    import termios
+    import tty
+
+    descriptor = sys.stdin.fileno()
+    previous_settings = termios.tcgetattr(descriptor)
+    try:
+        tty.setraw(descriptor)
+        key = sys.stdin.read(1)
+        if key == "\x1b":
+            key += sys.stdin.read(2)
+            return {"\x1b[A": "up", "\x1b[B": "down"}.get(key, "")
+        return {"\r": "enter", "\n": "enter", "\x03": "interrupt", " ": "space"}.get(key, "")
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, previous_settings)
+
+
+def _choose_option(
+    title: str,
+    options: list[tuple[str, str]],
+    default: str,
+    input_fn: Callable[[str], str] | None = None,
+) -> str:
+    selected = next((i for i, (value, _) in enumerate(options) if value == default), 0)
+
+    if input_fn is not None or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print_step(title)
+        for index, (value, label) in enumerate(options, start=1):
+            marker = " (default)" if value == default else ""
+            print(f"  {index}. {label}{marker}")
+        choices = {str(index): value for index, (value, _) in enumerate(options, start=1)}
+        choices.update({value.lower(): value for value, _ in options})
+        while True:
+            answer = (input_fn or input)(f"Enter choice [{selected + 1}]: ").strip().lower()
+            if not answer:
+                return options[selected][0]
+            if answer in choices:
+                return choices[answer]
+            print_error("Invalid selection. Choose one of the listed options.")
+
+    print_step(title)
+    menu_height = len(options)
+
+    def render() -> None:
+        for index, (_, label) in enumerate(options):
+            marker = ">" if index == selected else " "
+            sys.stdout.write(f"\r\033[2K  {marker} {label}\n")
+        sys.stdout.flush()
+
+    render()
     while True:
-        choice = input_fn(f"\nEnter choice [1-{len(PLATFORMS)}]: ").strip()
-        if choice in PLATFORMS:
-            return PLATFORMS[choice][0]
-        print_error("Invalid selection. Please enter 1 or 2.")
+        key = _read_menu_key()
+        if key == "interrupt":
+            raise KeyboardInterrupt
+        if key == "enter":
+            return options[selected][0]
+        if key in {"up", "down"}:
+            selected = (selected + (-1 if key == "up" else 1)) % len(options)
+            sys.stdout.write(f"\033[{menu_height}A")
+            render()
 
 
-def choose_provider(input_fn: Callable[[str], str], current_provider: str) -> str:
-    print_step("Select LLM Provider")
+def _normalize_platform_selection(value: str) -> str:
+    selected = [name.strip().lower() for name in value.split(",") if name.strip()]
+    if not selected:
+        selected = ["webui"]
+    if "webui" not in selected:
+        selected.insert(0, "webui")
+    optional = [name for name in selected if name in OPTIONAL_PLATFORMS]
+    unsupported = set(selected) - {"webui", *OPTIONAL_PLATFORMS}
+    if unsupported:
+        raise ValueError(f"Unsupported platform selection: {', '.join(sorted(unsupported))}.")
+    if len(optional) > 1:
+        raise ValueError("Select at most one additional platform: Discord or Telegram.")
+    return ",".join(["webui", *optional])
+
+
+def choose_platform(
+    input_fn: Callable[[str], str] | None = None,
+    current_platform: str = "webui",
+) -> str:
+    default = _normalize_platform_selection(current_platform)
+    default_choice = {"webui": "1", "webui,discord": "2", "webui,telegram": "3"}[default]
+    if input_fn is not None or not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print_step("Select Platforms")
+        options = [
+            ("1", "WebUI (required)"),
+            ("2", "WebUI + Discord"),
+            ("3", "WebUI + Telegram (Experimental)"),
+        ]
+        for value, label in options:
+            marker = " (default)" if value == default_choice else ""
+            print(f"  {value}. {label}{marker}")
+        while True:
+            answer = (input_fn or input)(f"Choose an additional platform [{default_choice}]: ").strip().lower()
+            if not answer:
+                answer = default_choice
+            if answer in {"1", "webui"}:
+                return "webui"
+            if answer in {"2", "discord"}:
+                return "webui,discord"
+            if answer in {"3", "telegram"}:
+                return "webui,telegram"
+            print_error("Choose WebUI only, WebUI + Discord, or WebUI + Telegram.")
+
+    selected = _normalize_platform_selection(current_platform).split(",")
+    cursor = 1
+    options = [
+        ("webui", "ZEUS WebUI (required)"),
+        ("discord", "Discord"),
+        ("telegram", "Telegram (Experimental)"),
+    ]
+    print_step("Select Platforms")
+
+    def render() -> None:
+        for index, (name, label) in enumerate(options):
+            marker = ">" if index == cursor else " "
+            checked = "x" if name == "webui" or name in selected else " "
+            sys.stdout.write(f"\r\033[2K  {marker} [{checked}] {label}\n")
+        sys.stdout.write("  Use ↑/↓ to navigate, Space to toggle, Enter to confirm.\n")
+        sys.stdout.flush()
+
+    render()
+    while True:
+        key = _read_menu_key()
+        if key == "interrupt":
+            raise KeyboardInterrupt
+        if key == "up":
+            cursor = 1 if cursor == 2 else 2
+            sys.stdout.write("\033[4A")
+            render()
+        elif key == "down":
+            cursor = 2 if cursor == 1 else 1
+            sys.stdout.write("\033[4A")
+            render()
+        elif key == "space":
+            choice = options[cursor][0]
+            if choice in selected:
+                selected.remove(choice)
+            else:
+                selected = ["webui", choice]
+            sys.stdout.write("\033[4A")
+            render()
+        elif key == "enter":
+            optional = next((name for name in OPTIONAL_PLATFORMS if name in selected), None)
+            return f"webui,{optional}" if optional else "webui"
+
+
+def choose_provider(
+    input_fn: Callable[[str], str] | None,
+    current_provider: str,
+) -> str:
     default = current_provider if current_provider in PROVIDERS else "ollama"
-    
-    for key, info in PROVIDERS.items():
-        marker = f"{Colors.GREEN}*(default)*{Colors.RESET}" if key == default else ""
-        print(f"  • {Colors.BOLD}{key:<10}{Colors.RESET} - {info['desc']} {marker}")
+    options = [
+        (name, f"{name} - {info['desc']}")
+        for name, info in PROVIDERS.items()
+    ]
+    return _choose_option("Select LLM Provider", options, default, input_fn)
 
-    while True:
-        choice = input_fn(f"\nEnter LLM provider ({Colors.CYAN}{default}{Colors.RESET}): ").strip().lower() or default
-        if choice in PROVIDERS:
-            return choice
-        print_error("Invalid choice. Choose ollama, lmstudio, or llamacpp.")
+
+def discover_models(provider: str, host: str, port: int) -> list[str]:
+    """Return model identifiers currently exposed by the configured local provider."""
+    base_url = f"http://{host}:{port}"
+
+    def fetch_json(path: str) -> dict[str, object]:
+        request = urllib.request.Request(f"{base_url}{path}")
+        with urllib.request.urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError(f"Unexpected model-list response from {path}.")
+        return data
+
+    if provider == "ollama":
+        data = fetch_json("/api/tags")
+        entries = data.get("models", [])
+        key = "name"
+    else:
+        try:
+            data = fetch_json("/v1/models")
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            if provider != "llamacpp":
+                raise
+            data = {}
+        entries = data.get("data", [])
+        key = "id"
+
+    if not isinstance(entries, list):
+        raise ValueError(f"Unexpected model list returned by {provider}.")
+    models = [
+        str(entry[key])
+        for entry in entries
+        if isinstance(entry, dict) and entry.get(key)
+    ]
+    if models or provider != "llamacpp":
+        return models
+
+    props = fetch_json("/props")
+    model_path = str(props.get("model") or props.get("model_path") or "")
+    model_id = Path(model_path.replace("\\", "/")).stem
+    return [model_id] if model_id else []
+
+
+def choose_model(
+    provider: str,
+    host: str,
+    port: int,
+    current_model: str = "",
+    input_fn: Callable[[str], str] | None = None,
+) -> str:
+    print_info("Scanning the configured LLM provider for available models...")
+    try:
+        models = discover_models(provider, host, port)
+    except (OSError, TimeoutError, ValueError) as exc:
+        print_warning(f"Could not scan models: {exc}")
+        models = []
+
+    if models:
+        print_success(f"Found {len(models)} model(s).")
+    else:
+        print_warning("No local models were found; Automatic will use runtime discovery.")
+    options = [(model, model) for model in models]
+    options.append(("", "Automatic"))
+    default = current_model if current_model in models else ""
+    return _choose_option("Available Local Models", options, default, input_fn)
 
 
 # ==========================================
@@ -196,11 +404,12 @@ def setup_project(
         print_info("Existing configuration detected (CIG=true). Skipping...")
         print(f"  {Colors.DIM}Tip: Pass '--force' or '-f' flag to reconfigure.{Colors.RESET}\n")
         
-        platform = existing.get("PLATFORM", "discord")
+        platform = _normalize_platform_selection(existing.get("PLATFORM", "webui"))
         provider = existing.get("ZEUS_PROVIDER", "ollama")
         config = {
             "PLATFORM": platform,
             "ZEUS_PROVIDER": provider,
+            "ZEUS_MODEL": existing.get("ZEUS_MODEL", ""),
             "LLM_HOST": existing.get("LLM_HOST", "localhost"),
             "LLM_PORT": existing.get("LLM_PORT", "11434"),
             "DB_HOST": existing.get("DB_HOST", "127.0.0.1"),
@@ -209,9 +418,31 @@ def setup_project(
             "DB_USER": existing.get("DB_USER", "zeus"),
             "DB_PASSWORD": existing.get("DB_PASSWORD") or secrets.token_urlsafe(32),
         }
+        selected = set(platform.split(","))
+        if (
+            "discord" in selected
+            and existing.get("DISCORD_BOT_API_KEY") in {None, "", "YOUR_BOT_TOKEN"}
+        ):
+            bot_token = ""
+            while not bot_token:
+                bot_token = getpass.getpass("Enter Discord Bot Token: ").strip()
+                if not bot_token:
+                    print_error("Token cannot be empty!")
+            config["DISCORD_BOT_API_KEY"] = bot_token
+            config["PFX"] = existing.get("PFX", "")
+        elif (
+            "telegram" in selected
+            and existing.get("TELEGRAM_BOT_API_KEY") in {None, "", "YOUR_BOT_TOKEN"}
+        ):
+            bot_token = ""
+            while not bot_token:
+                bot_token = getpass.getpass("Enter Telegram Bot Token: ").strip()
+                if not bot_token:
+                    print_error("Token cannot be empty!")
+            config["TELEGRAM_BOT_API_KEY"] = bot_token
     else:
-        platform = choose_platform(prompt)
-        provider = choose_provider(prompt, existing.get("ZEUS_PROVIDER", "ollama"))
+        platform = choose_platform(input_fn, existing.get("PLATFORM", "webui"))
+        provider = choose_provider(input_fn, existing.get("ZEUS_PROVIDER", "ollama"))
 
         # Provider Host & Port
         defaults = PROVIDERS[provider]
@@ -228,9 +459,18 @@ def setup_project(
             except ValueError:
                 print_error("Port must be a valid integer.")
 
+        model = choose_model(
+            provider,
+            host,
+            port,
+            existing.get("ZEUS_MODEL", ""),
+            input_fn,
+        )
+
         config = {
             "PLATFORM": platform,
             "ZEUS_PROVIDER": provider,
+            "ZEUS_MODEL": model,
             "LLM_HOST": host,
             "LLM_PORT": str(port),
             "DB_HOST": existing.get("DB_HOST", "127.0.0.1"),
@@ -241,7 +481,8 @@ def setup_project(
         }
 
         # Platform specific settings
-        if platform == "discord":
+        selected = set(platform.split(","))
+        if "discord" in selected:
             print_step("Discord Bot Settings")
             bot_token = ""
             while not bot_token:
@@ -252,6 +493,14 @@ def setup_project(
             bot_prefix = prompt("Enter Bot Prefix (default empty): ").strip()
             config["DISCORD_BOT_API_KEY"] = bot_token
             config["PFX"] = bot_prefix
+        elif "telegram" in selected:
+            print_step("Telegram Bot Settings")
+            bot_token = ""
+            while not bot_token:
+                bot_token = getpass.getpass("Enter Telegram Bot Token: ").strip()
+                if not bot_token:
+                    print_error("Token cannot be empty!")
+            config["TELEGRAM_BOT_API_KEY"] = bot_token
 
         config["CIG"] = "true"
 
@@ -260,20 +509,18 @@ def setup_project(
 
     # Dependency Installation
     print_step("Installing Dependencies")
-    if platform == "discord":
-        run_with_spinner(npm_install_command(), cwd=root, desc="Installing Node.js dependencies")
-        run_with_spinner([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=root, desc="Installing Python packages")
-    else:
+    run_with_spinner(npm_install_command(), cwd=root, desc="Installing Node.js dependencies")
+    run_with_spinner([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=root, desc="Installing Python packages")
+    if "telegram" in platform.split(","):
         print_warning("Telegram support is currently in preview and testing")
 
     # Summary
     print(f"\n{Colors.GREEN}{Colors.BOLD}🎉 ZEUS Setup Complete!{Colors.RESET}")
-    print(f"  • Platform  : {Colors.CYAN}{platform}{Colors.RESET}")
+    print(f"  • Platforms : {Colors.CYAN}{platform.replace(',', ' + ')}{Colors.RESET}")
     print(f"  • Provider  : {Colors.CYAN}{provider}{Colors.RESET}")
     print(f"  • LLM Target: {Colors.CYAN}{config['LLM_HOST']}:{config['LLM_PORT']}{Colors.RESET}\n")
 
-    if platform == "discord":
-        print(f"To run ZEUS, use {Colors.BOLD}{Colors.YELLOW}python app.py{Colors.RESET}\n")
+    print(f"To run ZEUS, use {Colors.BOLD}{Colors.YELLOW}python app.py{Colors.RESET}\n")
 
     return config
 

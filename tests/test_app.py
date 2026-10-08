@@ -37,6 +37,33 @@ class RunLogRecorderTests(unittest.TestCase):
 
 
 class ManagedDatabaseTests(unittest.TestCase):
+    def test_selected_platforms_always_include_webui_and_allow_one_bot(self) -> None:
+        self.assertEqual(app._selected_platforms(""), ("webui",))
+        self.assertEqual(app._selected_platforms("discord"), ("webui", "discord"))
+        self.assertEqual(
+            app._selected_platforms("webui,telegram"),
+            ("webui", "telegram"),
+        )
+        with self.assertRaisesRegex(RuntimeError, "at most one"):
+            app._selected_platforms("webui,discord,telegram")
+
+    def test_webui_bridge_uses_its_own_port_and_is_marked_supervised(self) -> None:
+        bridge = MagicMock()
+        server = MagicMock()
+        with (
+            patch.dict("os.environ", {"BRIDGE_PORT": "5000"}, clear=True),
+            patch("app.subprocess.Popen", side_effect=[bridge, server]) as popen,
+            patch("app._wait_for_bridge") as wait_for_bridge,
+        ):
+            app._start_webui("node", 5001)
+
+        wait_for_bridge.assert_called_once_with(bridge, 5001)
+        bridge_environment = popen.call_args_list[0].kwargs["env"]
+        webui_environment = popen.call_args_list[1].kwargs["env"]
+        self.assertEqual(bridge_environment["BRIDGE_PORT"], "5001")
+        self.assertEqual(webui_environment["BRIDGE_URL"], "http://127.0.0.1:5001")
+        self.assertEqual(webui_environment["ZEUS_SUPERVISED_BRIDGE"], "true")
+
     def test_container_managed_database_does_not_require_docker(self) -> None:
         environment = {
             "ZEUS_MANAGED_DATABASE": "true",
@@ -68,11 +95,32 @@ class ManagedDatabaseTests(unittest.TestCase):
                 {"ZEUS_MANAGED_DATABASE": "true", "PLATFORM": "telegram"},
                 clear=True,
             ),
+            patch("sys.argv", ["app.py"]),
             patch.object(app, "run_platform", return_value=0) as run_platform,
         ):
             self.assertEqual(app.main(), 0)
 
-        run_platform.assert_called_once_with(name="telegram", record_logs=False)
+        run_platform.assert_called_once_with(
+            name="telegram",
+            record_logs=False,
+            with_webui=True,
+        )
+
+    def test_webui_is_the_default_platform(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            patch.object(app, "ROOT", Path(temporary_directory)),
+            patch.dict(
+                "os.environ",
+                {"ZEUS_MANAGED_DATABASE": "true", "PLATFORM": "webui"},
+                clear=True,
+            ),
+            patch("sys.argv", ["app.py"]),
+            patch.object(app, "run_webui", return_value=0) as run_webui,
+        ):
+            self.assertEqual(app.main(), 0)
+
+        run_webui.assert_called_once_with()
 
 
 if __name__ == "__main__":

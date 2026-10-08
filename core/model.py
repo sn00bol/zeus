@@ -188,7 +188,13 @@ class ModelManager:
             )
 
         provider = self.get_provider(provider_name)
-        model_name = request.model
+        requested_model = request.model
+        if requested_model and requested_model.strip().lower() in {"auto", "automatic"}:
+            requested_model = None
+        configured_model = os.environ.get("ZEUS_MODEL", "").strip()
+        if configured_model.lower() in {"auto", "automatic"}:
+            configured_model = ""
+        model_name = requested_model or configured_model or None
         models: list[ModelInfo] = []
         if not model_name:
             models = await self.models_for(provider_name)
@@ -206,7 +212,7 @@ class ModelManager:
                         (model for model in cached[1] if model.id == model_name),
                         None,
                     )
-        if request.model is None:
+        if requested_model is None:
             listed_model = next((model for model in models if model.id == model_name), None)
             selected_model = await self.model_info_for(provider_name, model_name) or listed_model
         self._last_provider_name = provider_name
@@ -285,6 +291,9 @@ class ModelManager:
     async def status(self) -> dict[str, str | int | None]:
         provider_name = self._last_provider_name or os.environ.get("ZEUS_PROVIDER", "").lower()
         model_name = self._last_model_name
+        configured_model = os.environ.get("ZEUS_MODEL", "").strip()
+        if not model_name and configured_model.lower() not in {"auto", "automatic"}:
+            model_name = configured_model or None
         context_length = self._last_context_length
 
         if not provider_name:

@@ -23,5 +23,6 @@ database/history.json
 # others
 test/
 **/*.test.js
+!tests/platform_healthcheck.test.js
 **/*.test.cjs
 .backups/

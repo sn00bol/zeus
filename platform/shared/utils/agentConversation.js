@@ -2,6 +2,7 @@ const { requestJson } = require('./agentBridge');
 
 const POLL_INTERVAL_MS = 1_000;
 const RUN_TIMEOUT_MS = 14 * 60 * 1_000;
+const PROVIDERS = new Set(['ollama', 'lmstudio', 'llamacpp']);
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -13,6 +14,43 @@ function getModelScope(platform, guildId, userId) {
         return guildId ? `discord:guild:${guildId}` : `discord:user:${userId}`;
     }
     throw new TypeError(`Unsupported conversation platform: ${platform}`);
+}
+
+function getEnvironmentModelSelection(models) {
+    const configuredProvider = String(process.env.ZEUS_PROVIDER || '').trim().toLowerCase();
+    if (configuredProvider && !PROVIDERS.has(configuredProvider)) {
+        throw new Error(
+            `Unsupported ZEUS_PROVIDER '${configuredProvider}'. Choose ollama, lmstudio, or llamacpp.`,
+        );
+    }
+    const configuredModel = String(process.env.ZEUS_MODEL || '').trim();
+    const modelIsAutomatic = ['auto', 'automatic'].includes(configuredModel.toLowerCase());
+
+    if (configuredModel && !modelIsAutomatic) {
+        const selected = models.find(item => (
+            item.model === configuredModel
+            && (!configuredProvider || item.provider === configuredProvider)
+        ));
+        if (!selected) {
+            const providerLabel = configuredProvider ? ` under '${configuredProvider}'` : '';
+            throw new Error(
+                `ZEUS_MODEL '${configuredModel}'${providerLabel} is not available. `
+                + 'Check ZEUS_MODEL and ZEUS_PROVIDER in .env.',
+            );
+        }
+        return selected;
+    }
+
+    const selected = configuredProvider
+        ? models.find(item => item.provider === configuredProvider)
+        : models[0];
+    if (!selected) {
+        throw new Error(
+            `No models are available from ZEUS_PROVIDER '${configuredProvider}'. `
+            + 'Check that the provider is running and has a model loaded.',
+        );
+    }
+    return selected;
 }
 
 async function selectModel(database, scopeId) {
@@ -28,7 +66,7 @@ async function selectModel(database, scopeId) {
             + 'running on the host; Ollama must listen on a network-accessible interface.',
         );
     }
-    return models[0];
+    return getEnvironmentModelSelection(models);
 }
 
 async function waitForRun(runId) {
@@ -143,6 +181,7 @@ async function storeAssistantReply(client, {
 
 module.exports = {
     generateConversationReply,
+    getEnvironmentModelSelection,
     getModelScope,
     selectModel,
     storeAssistantReply,

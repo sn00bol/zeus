@@ -1,6 +1,6 @@
 <div align="center">
 <img width="150" height="150" alt="Basda Logo" src="assets/Basda.png" />
-  <p>A self-hosting AI Agent for Discord, Telegram</p>
+  <p>A self-hosting AI Agent for WebUI, Discord, and Telegram</p>
   <p>
     <a href="#features">Features</a> ·
     <a href="#setup">Setup</a> ·
@@ -32,7 +32,7 @@
 - Node.js (16.11+ or higher)
 - Python (3.13+ or higher)
 - Docker Desktop (latest version)
-- Discord/telegram bot token
+- Optional Discord or Telegram bot token
 
 ### Install and run
 1. Get the source code:
@@ -41,18 +41,18 @@ git clone https://github.com/sn00bol/zeus.git
 cd zeus
 ```
 
-2. Run the interactive setup:
+2. Install dependencies (Optional if you want run directly `python app.py`):
 ```bash
 python setup.py
 ```
-This script run both `pip install` and `npm install`, so you dont have to install dependencies single of them (and get fail lol)
+This script installs Python and Node.js dependencies and configures the LLM. WebUI is always selected; use the platform selector to optionally add either Discord or Telegram.
 
-3. Build and run bot container:
+3. Build and start container:
 ```bash
 docker compose up --build -d
 ```
 
-Now your bot is alive and enjoy!
+The WebUI is available at `http://localhost:3000`. If you selected Discord or Telegram, it runs alongside the WebUI.
 
 ## Contributing
 Zeus is openly welcome who pull request and contributing to this small project, for more details you can read [CONTRIBUTING.md](CONTRIBUTING.md)

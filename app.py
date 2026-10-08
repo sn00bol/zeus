@@ -158,7 +158,110 @@ def _uses_managed_database() -> bool:
     return os.environ.get("ZEUS_MANAGED_DATABASE", "").strip().lower() == "true"
 
 
-def run_platform(*, name: str, record_logs: bool = False) -> int:
+def _configured_port(name: str, default: int) -> int:
+    try:
+        port = int(os.environ.get(name) or str(default))
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a valid TCP port.") from exc
+    if not 1 <= port <= 65535:
+        raise RuntimeError(f"{name} must be between 1 and 65535.")
+    return port
+
+
+def _webui_port() -> int:
+    return _configured_port("WEBUI_PORT", 3000)
+
+
+def _selected_platforms(value: str | None = None) -> tuple[str, ...]:
+    raw = os.environ.get("PLATFORM", "webui") if value is None else value
+    selected = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    if not selected:
+        selected = ["webui"]
+    if "webui" not in selected:
+        selected.insert(0, "webui")
+    unsupported = set(selected) - {"webui", "discord", "telegram"}
+    if unsupported:
+        raise RuntimeError(
+            f"Unsupported platform(s) {', '.join(sorted(unsupported))}. "
+            "Choose WebUI and optionally Discord or Telegram."
+        )
+    bot_platforms = [item for item in selected if item in {"discord", "telegram"}]
+    if len(bot_platforms) > 1:
+        raise RuntimeError("Select at most one additional platform: Discord or Telegram.")
+    return ("webui", *bot_platforms)
+
+
+def _start_webui(node: str, bridge_port: int) -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
+    environment = os.environ.copy()
+    environment.update({
+        "BRIDGE_HOST": os.environ.get("BRIDGE_HOST", "127.0.0.1"),
+        "BRIDGE_PORT": str(bridge_port),
+        "BRIDGE_URL": f"http://127.0.0.1:{bridge_port}",
+        "ZEUS_SUPERVISED_BRIDGE": "true",
+    })
+    bridge = subprocess.Popen(
+        [sys.executable, "-m", "src.discord_bridge"],
+        cwd=ROOT,
+        env=environment,
+    )
+    try:
+        _wait_for_bridge(bridge, bridge_port)
+        server = subprocess.Popen(
+            [node, str(ROOT / "webui" / "app.js")],
+            cwd=ROOT,
+            env=environment,
+        )
+    except Exception:
+        _stop_process(bridge)
+        raise
+    return bridge, server
+
+
+def run_webui() -> int:
+    if not os.environ.get("DB_PASSWORD"):
+        raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("Node.js is required to start the WebUI.")
+
+    if not _uses_managed_database():
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
+        _require_docker_engine(docker)
+        subprocess.run(
+            [docker, "compose", "up", "-d", "--wait", "postgres"],
+            cwd=ROOT,
+            check=True,
+        )
+
+    bridge: subprocess.Popen[str] | None = None
+    server: subprocess.Popen[str] | None = None
+    try:
+        bridge_port = _configured_port("BRIDGE_PORT", 5000)
+        bridge, server = _start_webui(node, bridge_port)
+        print("ZEUS WebUI is running. Press Ctrl+C to stop.")
+        while True:
+            if bridge.poll() is not None:
+                raise RuntimeError(f"The WebUI inference bridge exited (code {bridge.returncode}).")
+            server_code = server.poll()
+            if server_code is not None:
+                return server_code
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nStopping ZEUS WebUI...")
+        return 0
+    finally:
+        _stop_process(server)
+        _stop_process(bridge)
+
+
+def run_platform(
+    *,
+    name: str,
+    record_logs: bool = False,
+    with_webui: bool = False,
+) -> int:
     token = os.environ.get(f"{name.upper()}_BOT_API_KEY" if name == "discord" else "TELEGRAM_BOT_API_KEY", "")
     if not token or token == "YOUR_BOT_TOKEN":
         raise RuntimeError(f"Set the API key in .env before starting {name}.")
@@ -181,9 +284,11 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
             raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
         _require_docker_engine(docker)
 
-    port = int(os.environ.get("BRIDGE_PORT", "5000"))
+    port = _configured_port("BRIDGE_PORT", 5000)
     bridge: subprocess.Popen[str] | None = None
     bot: subprocess.Popen[str] | None = None
+    webui_bridge: subprocess.Popen[str] | None = None
+    webui_server: subprocess.Popen[str] | None = None
     recorder = _RunLogRecorder() if record_logs else None
     try:
         if managed_database:
@@ -226,6 +331,13 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
             recorder.health_log_received.wait(timeout=1)
         bot_environment = os.environ.copy()
         bot_environment["ZEUS_SUPERVISED"] = "1"
+        bot_environment["PLATFORM"] = name
+        if with_webui:
+            webui_port = _webui_port()
+            healthcheck_port = _configured_port("HEALTHCHECK_PORT", 3001)
+            if healthcheck_port == webui_port:
+                raise RuntimeError("HEALTHCHECK_PORT must differ from WEBUI_PORT.")
+            bot_environment["HEALTHCHECK_PORT"] = str(healthcheck_port)
         bot_command = [node, str(ROOT / "platform" / name / "index.js")]
         bot_options: dict[str, object] = {"cwd": ROOT, "env": bot_environment}
         if recorder:
@@ -234,12 +346,24 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
         bot = subprocess.Popen(bot_command, **bot_options)
         if recorder and bot.stdout:
             recorder.attach(name, bot.stdout)
+        if with_webui:
+            webui_bridge_port = _configured_port("WEBUI_BRIDGE_PORT", port + 1)
+            if webui_bridge_port == port:
+                raise RuntimeError("WEBUI_BRIDGE_PORT must differ from BRIDGE_PORT.")
+            webui_bridge, webui_server = _start_webui(node, webui_bridge_port)
+            print(f"ZEUS WebUI is available at http://localhost:{_webui_port()}.")
         if recorder:
             recorder.record(f"ZEUS {name} platform is running.")
         print(f"ZEUS {name} platform is running. Press Ctrl+C to stop.")
         while True:
             if bridge.poll() is not None:
                 raise RuntimeError(f"The inference bridge exited (code {bridge.returncode}).")
+            if webui_bridge and webui_bridge.poll() is not None:
+                raise RuntimeError(
+                    f"The WebUI inference bridge exited (code {webui_bridge.returncode})."
+                )
+            if webui_server and webui_server.poll() is not None:
+                raise RuntimeError(f"The WebUI server exited (code {webui_server.returncode}).")
             action = _poll_control(port)
             if action == "stop":
                 if recorder:
@@ -276,6 +400,8 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
         raise
     finally:
         _stop_process(bot)
+        _stop_process(webui_server)
+        _stop_process(webui_bridge)
         _stop_process(bridge)
         if recorder:
             recorder.finish()
@@ -284,20 +410,22 @@ def run_platform(*, name: str, record_logs: bool = False) -> int:
 def main() -> int:
     if not (ROOT / ".env").exists() and not _uses_managed_database():
         raise RuntimeError("Missing .env. Run `python setup.py` first.")
-    platform = os.environ.get("PLATFORM", "discord").strip().lower()
-    if platform == "discord":
-        parser = argparse.ArgumentParser(description="Start ZEUS.")
-        parser.add_argument(
-            "--logs",
-            action="store_true",
-            help="save process logs on shutdown while keeping the console quiet",
+    parser = argparse.ArgumentParser(description="Start ZEUS.")
+    parser.add_argument(
+        "--logs",
+        action="store_true",
+        help="save process logs on shutdown while keeping the console quiet",
+    )
+    args = parser.parse_args()
+    platforms = _selected_platforms()
+    bot_platform = next((name for name in platforms if name != "webui"), None)
+    if bot_platform:
+        return run_platform(
+            name=bot_platform,
+            record_logs=args.logs if bot_platform == "discord" else False,
+            with_webui=True,
         )
-        args = parser.parse_args()
-        return run_platform(name="discord", record_logs=args.logs)
-    if platform == "telegram":
-        return run_platform(name="telegram", record_logs=False)
-    raise RuntimeError(f"Unsupported PLATFORM '{platform}' in .env.")
-    raise RuntimeError(f"Unsupported PLATFORM '{platform}' in .env.")
+    return run_webui()
 
 
 if __name__ == "__main__":

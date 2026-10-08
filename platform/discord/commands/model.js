@@ -1,4 +1,5 @@
 const {
+    getEnvironmentModelSelection,
     getAvailableModels,
     setModelToAutomatic,
     setPreferredModel,
@@ -52,9 +53,11 @@ module.exports = {
                     await replyToCommand(context, 'No local AI models are available. Start a provider and load a model.');
                     return;
                 }
+                const configured = current ? null : getEnvironmentModelSelection(models);
+                const effective = current || configured;
                 const lines = models.map(item => {
-                    const selected = current?.provider === item.provider
-                        && current?.model === item.model ? ' **(selected)**' : '';
+                    const selected = effective?.provider === item.provider
+                        && effective?.model === item.model ? ' **(selected)**' : '';
                     return `• \`${item.provider}\` — \`${item.model}\`${selected}`;
                 });
                 const visibleLines = [];
@@ -68,15 +71,15 @@ module.exports = {
                     visibleLines.push(`…and ${lines.length - visibleLines.length} more.`);
                 }
                 const mode = current?.provider
-                    ? `Selected: \`${current.provider}/${current.model}\``
-                    : 'Selection: automatic';
+                    ? `Selected for this server/user: \`${current.provider}/${current.model}\``
+                    : `Default from .env: \`${effective.provider}/${effective.model}\``;
                 await replyToCommand(context, `**Available local models**\n${visibleLines.join('\n')}\n\n${mode}\nSet: \`/model set\` · Auto: \`/model auto\``);
                 return;
             }
 
             if (action === 'auto') {
                 await setModelToAutomatic(context.client.db, scopeId);
-                await replyToCommand(context, 'Automatic model selection enabled. ZEUS will scan local providers and use the first available model for each new chat response.');
+                await replyToCommand(context, 'The per-server/user model override was cleared. ZEUS will now follow ZEUS_PROVIDER and ZEUS_MODEL from .env.');
                 return;
             }
 
