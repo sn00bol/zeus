@@ -25,4 +25,5 @@ test/
 **/*.test.js
 !tests/platform_healthcheck.test.js
 **/*.test.cjs
+!tests/webui.test.cjs
 .backups/

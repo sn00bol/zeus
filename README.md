@@ -39,20 +39,10 @@
 ```bash
 git clone https://github.com/sn00bol/zeus.git
 cd zeus
-```
-
-2. Install dependencies (Optional if you want run directly `python app.py`):
-```bash
-python setup.py
-```
-This script installs Python and Node.js dependencies and configures the LLM. WebUI is always selected; use the platform selector to optionally add either Discord or Telegram.
-
-3. Build and start container:
-```bash
 docker compose up --build -d
 ```
 
-The WebUI is available at `http://localhost:3000`. If you selected Discord or Telegram, it runs alongside the WebUI.
+The WebUI is available at `http://localhost:3000` (or the port configured by `WEBUI_PORT` in `.env`) also run with platform if you had setup with them
 
 ## Contributing
 Zeus is openly welcome who pull request and contributing to this small project, for more details you can read [CONTRIBUTING.md](CONTRIBUTING.md)

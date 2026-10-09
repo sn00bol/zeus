@@ -191,38 +191,31 @@ def _selected_platforms(value: str | None = None) -> tuple[str, ...]:
     return ("webui", *bot_platforms)
 
 
-def _start_webui(node: str, bridge_port: int) -> tuple[subprocess.Popen[str], subprocess.Popen[str]]:
+def _start_webui(node: str) -> subprocess.Popen[str]:
     environment = os.environ.copy()
-    environment.update({
-        "BRIDGE_HOST": os.environ.get("BRIDGE_HOST", "127.0.0.1"),
-        "BRIDGE_PORT": str(bridge_port),
-        "BRIDGE_URL": f"http://127.0.0.1:{bridge_port}",
-        "ZEUS_SUPERVISED_BRIDGE": "true",
-    })
-    bridge = subprocess.Popen(
-        [sys.executable, "-m", "src.discord_bridge"],
-        cwd=ROOT,
-        env=environment,
-    )
+    server = subprocess.Popen([node, str(ROOT / "webui" / "app.js")], cwd=ROOT, env=environment)
     try:
-        _wait_for_bridge(bridge, bridge_port)
-        server = subprocess.Popen(
-            [node, str(ROOT / "webui" / "app.js")],
-            cwd=ROOT,
-            env=environment,
-        )
+        deadline = time.monotonic() + 30
+        health_url = f"http://127.0.0.1:{_webui_port()}/health"
+        while time.monotonic() < deadline:
+            exit_code = server.poll()
+            if exit_code is not None:
+                raise RuntimeError(f"The WebUI server exited during startup (code {exit_code}).")
+            try:
+                with urlopen(health_url, timeout=1) as response:
+                    if response.status == 200:
+                        return server
+            except (OSError, URLError):
+                time.sleep(0.25)
+        raise RuntimeError(f"The WebUI server did not become ready at {health_url}.")
     except Exception:
-        _stop_process(bridge)
+        _stop_process(server)
         raise
-    return bridge, server
 
 
 def run_webui() -> int:
     if not os.environ.get("DB_PASSWORD"):
         raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
-    node = shutil.which("node")
-    if node is None:
-        raise RuntimeError("Node.js is required to start the WebUI.")
 
     if not _uses_managed_database():
         docker = shutil.which("docker")
@@ -235,25 +228,23 @@ def run_webui() -> int:
             check=True,
         )
 
-    bridge: subprocess.Popen[str] | None = None
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("Node.js is required to start the WebUI.")
+
     server: subprocess.Popen[str] | None = None
     try:
-        bridge_port = _configured_port("BRIDGE_PORT", 5000)
-        bridge, server = _start_webui(node, bridge_port)
+        server = _start_webui(node)
         print("ZEUS WebUI is running. Press Ctrl+C to stop.")
         while True:
-            if bridge.poll() is not None:
-                raise RuntimeError(f"The WebUI inference bridge exited (code {bridge.returncode}).")
-            server_code = server.poll()
-            if server_code is not None:
-                return server_code
+            if server.poll() is not None:
+                raise RuntimeError(f"The WebUI server exited (code {server.returncode}).")
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nStopping ZEUS WebUI...")
         return 0
     finally:
         _stop_process(server)
-        _stop_process(bridge)
 
 
 def run_platform(
@@ -287,7 +278,6 @@ def run_platform(
     port = _configured_port("BRIDGE_PORT", 5000)
     bridge: subprocess.Popen[str] | None = None
     bot: subprocess.Popen[str] | None = None
-    webui_bridge: subprocess.Popen[str] | None = None
     webui_server: subprocess.Popen[str] | None = None
     recorder = _RunLogRecorder() if record_logs else None
     try:
@@ -347,10 +337,7 @@ def run_platform(
         if recorder and bot.stdout:
             recorder.attach(name, bot.stdout)
         if with_webui:
-            webui_bridge_port = _configured_port("WEBUI_BRIDGE_PORT", port + 1)
-            if webui_bridge_port == port:
-                raise RuntimeError("WEBUI_BRIDGE_PORT must differ from BRIDGE_PORT.")
-            webui_bridge, webui_server = _start_webui(node, webui_bridge_port)
+            webui_server = _start_webui(node)
             print(f"ZEUS WebUI is available at http://localhost:{_webui_port()}.")
         if recorder:
             recorder.record(f"ZEUS {name} platform is running.")
@@ -358,10 +345,6 @@ def run_platform(
         while True:
             if bridge.poll() is not None:
                 raise RuntimeError(f"The inference bridge exited (code {bridge.returncode}).")
-            if webui_bridge and webui_bridge.poll() is not None:
-                raise RuntimeError(
-                    f"The WebUI inference bridge exited (code {webui_bridge.returncode})."
-                )
             if webui_server and webui_server.poll() is not None:
                 raise RuntimeError(f"The WebUI server exited (code {webui_server.returncode}).")
             action = _poll_control(port)
@@ -401,7 +384,6 @@ def run_platform(
     finally:
         _stop_process(bot)
         _stop_process(webui_server)
-        _stop_process(webui_bridge)
         _stop_process(bridge)
         if recorder:
             recorder.finish()

@@ -9,5 +9,7 @@ skills     Bot personality and behaviour definitions
 
 Scripts
 -------
-discord_bridge.py   HTTP bridge between the Discord bot (Node.js) and the root router package
+webui_bridge.py      Private inference bridge for the Node WebUI
+discord_bridge.py    HTTP adapter for the Discord bot
+telegram_bridge.py   HTTP adapter for the Telegram bot
 """

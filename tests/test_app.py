@@ -47,22 +47,23 @@ class ManagedDatabaseTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "at most one"):
             app._selected_platforms("webui,discord,telegram")
 
-    def test_webui_bridge_uses_its_own_port_and_is_marked_supervised(self) -> None:
-        bridge = MagicMock()
+    def test_webui_starts_its_node_runtime_without_reusing_a_platform_bridge(self) -> None:
         server = MagicMock()
+        server.poll.return_value = None
         with (
-            patch.dict("os.environ", {"BRIDGE_PORT": "5000"}, clear=True),
-            patch("app.subprocess.Popen", side_effect=[bridge, server]) as popen,
-            patch("app._wait_for_bridge") as wait_for_bridge,
+            patch.dict("os.environ", {"WEBUI_PORT": "5001", "BRIDGE_PORT": "5000"}, clear=True),
+            patch("app.subprocess.Popen", return_value=server) as popen,
+            patch("app.urlopen") as urlopen,
         ):
-            app._start_webui("node", 5001)
+            urlopen.return_value.__enter__.return_value.status = 200
+            app._start_webui("node-test")
 
-        wait_for_bridge.assert_called_once_with(bridge, 5001)
-        bridge_environment = popen.call_args_list[0].kwargs["env"]
-        webui_environment = popen.call_args_list[1].kwargs["env"]
-        self.assertEqual(bridge_environment["BRIDGE_PORT"], "5001")
-        self.assertEqual(webui_environment["BRIDGE_URL"], "http://127.0.0.1:5001")
-        self.assertEqual(webui_environment["ZEUS_SUPERVISED_BRIDGE"], "true")
+        self.assertEqual(popen.call_count, 1)
+        self.assertEqual(
+            popen.call_args.args[0],
+            ["node-test", str(app.ROOT / "webui" / "app.js")],
+        )
+        urlopen.assert_called_once_with("http://127.0.0.1:5001/health", timeout=1)
 
     def test_container_managed_database_does_not_require_docker(self) -> None:
         environment = {

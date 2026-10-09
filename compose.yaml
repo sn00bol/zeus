@@ -22,12 +22,15 @@ services:
       dockerfile: Dockerfile
     image: ${ZEUS_IMAGE:-zeus:local}
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEBUI_PORT:-3000}:${WEBUI_PORT:-3000}"
     env_file:
       - .env
     environment:
       ZEUS_MANAGED_DATABASE: "true"
       DB_HOST: postgres
       DB_PORT: "5432"
+      WEBUI_HOST: "0.0.0.0"
       LLM_HOST: ${ZEUS_LLM_HOST:-host.docker.internal}
       ENABLE_DOCKER_HEALTHCHECK: "true"
     depends_on:

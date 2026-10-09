@@ -18,15 +18,16 @@ kept alive as a pool so their HTTP connections and /props caches are reused.
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 try:
     import httpx
 except ImportError:
     httpx = None  # type: ignore[assignment]
 
-from core.model import ModelManager
+from core.model import ModelContext, ModelManager
 from core.memory import MemoryStore
 from core.session import Session
 from core.session_manager import SessionManager
@@ -188,7 +189,46 @@ class Router:
         )
 
         response = self._parse_response(raw, context.provider_name, context.model_name)
+        await self._record_response(request, context, response)
+        return response
 
+    async def route_stream(
+        self,
+        request: InferenceRequest,
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> InferenceResponse:
+        """Stream model deltas to a callback and return the completed response."""
+        context = await self.model_manager.resolve(request)
+        client = await self._get_client()
+        content, usage, finish_reason, actual_model = await self._stream_backend(
+            provider=context.provider,
+            model_id=context.model_name,
+            messages=context.messages,
+            temperature=context.temperature,
+            max_tokens=context.max_tokens,
+            extra=request.extra,
+            client=client,
+            api_token=context.api_token,
+            on_delta=on_delta,
+        )
+        response = InferenceResponse(
+            content=content,
+            model=actual_model,
+            provider=context.provider_name,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+            finish_reason=finish_reason,
+            raw={"stream": True},
+        )
+        await self._record_response(request, context, response)
+        return response
+
+    async def _record_response(
+        self,
+        request: InferenceRequest,
+        context: ModelContext,
+        response: InferenceResponse,
+    ) -> None:
         session = context.session
         if self.session_manager is not None and session is not None:
             try:
@@ -218,7 +258,6 @@ class Router:
                     )
                 except Exception:
                     log.exception("Could not save conversation memory for user %s", session.user_id)
-        return response
 
     # ------------------------------------------------------------------
     # Backend request
@@ -270,6 +309,96 @@ class Router:
         )
         resp.raise_for_status()
         return resp.json()
+
+    @staticmethod
+    async def _stream_backend(
+        provider: BaseProvider,
+        model_id: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int | None,
+        extra: dict[str, Any],
+        client: httpx.AsyncClient,
+        api_token: str | None,
+        on_delta: Callable[[str], Awaitable[None]],
+    ) -> tuple[str, dict[str, int], str, str]:
+        if httpx is None:
+            raise RuntimeError("httpx is required: pip install httpx")
+
+        base = provider.endpoint.base_url.rstrip("/")
+        url = (
+            f"{base}/v1/chat/completions"
+            if provider.name == "ollama"
+            else f"{base}/chat/completions"
+        )
+        payload: dict[str, Any] = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+            **extra,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        headers = {"Authorization": f"Bearer {api_token}"} if api_token else None
+
+        parts: list[str] = []
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
+        finish_reason = "stop"
+        actual_model = model_id
+        terminal_received = False
+        stream_timeout = httpx.Timeout(connect=10, read=None, write=30, pool=10)
+        async with client.stream(
+            "POST",
+            url,
+            json=payload,
+            headers=headers,
+            timeout=stream_timeout,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if not data:
+                    continue
+                if data == "[DONE]":
+                    terminal_received = True
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("The model returned malformed streaming data.") from exc
+                if not isinstance(chunk, dict):
+                    raise RuntimeError("The model returned an invalid streaming event.")
+                if "error" in chunk:
+                    detail = chunk["error"]
+                    raise RuntimeError(f"The model stream failed: {detail}")
+                actual_model = str(chunk.get("model") or actual_model)
+                chunk_usage = chunk.get("usage")
+                if isinstance(chunk_usage, dict):
+                    for key in usage:
+                        value = chunk_usage.get(key)
+                        if isinstance(value, int) and value >= 0:
+                            usage[key] = value
+                choices = chunk.get("choices")
+                if not isinstance(choices, list) or not choices:
+                    continue
+                choice = choices[0]
+                if not isinstance(choice, dict):
+                    continue
+                chunk_finish_reason = choice.get("finish_reason")
+                if chunk_finish_reason:
+                    finish_reason = str(chunk_finish_reason)
+                    terminal_received = True
+                delta = choice.get("delta")
+                text = delta.get("content") if isinstance(delta, dict) else None
+                if isinstance(text, str) and text:
+                    parts.append(text)
+                    await on_delta(text)
+        if not terminal_received:
+            raise RuntimeError("The model stream ended before the response was complete.")
+        return "".join(parts), usage, str(finish_reason), actual_model
 
     @staticmethod
     def _parse_response(raw: dict[str, Any], provider: str, model: str) -> InferenceResponse:

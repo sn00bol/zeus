@@ -6,7 +6,7 @@ function parseEvent(event) {
     }
 }
 
-export async function watchChatStream({ conversationId, message, onEvent }) {
+export async function startChatStream({ conversationId, message }) {
     const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -14,9 +14,12 @@ export async function watchChatStream({ conversationId, message, onEvent }) {
     });
     const start = await response.json();
     if (!response.ok) throw new Error(start.error || `Chat request failed (${response.status}).`);
+    return start.streamId;
+}
 
+export function watchChatStream({ streamId, onEvent }) {
     return new Promise((resolve, reject) => {
-        const source = new EventSource(`/api/streams/${encodeURIComponent(start.streamId)}/events`);
+        const source = new EventSource(`/api/streams/${encodeURIComponent(streamId)}/events`);
         let settled = false;
 
         const stop = () => {
@@ -55,6 +58,6 @@ export async function watchChatStream({ conversationId, message, onEvent }) {
             }
         };
 
-        onEvent('stream_started', { streamId: start.streamId });
+        onEvent('stream_started', { streamId });
     });
 }

@@ -28,7 +28,6 @@ Database
 - Graceful degradation when PostgreSQL is unavailable
 
 TODOS:
-- Make webui using it own bridge (currently use platform bridge lo)
 - Add random text for fun when start new chat
 - Improving webui and menu bar, format text
 - Add ZEUS Webui settings, model selection more advance

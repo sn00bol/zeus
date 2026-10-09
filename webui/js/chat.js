@@ -2,7 +2,7 @@ import { createLoadingIndicator } from './loading.js';
 import { getModelChoices, setModelChoice } from './model.js';
 import { renderMessageContent } from './render.js';
 import { addCodeCopyControls, renderStreamDetails } from './streamaddon.js';
-import { watchChatStream } from './stream.js';
+import { startChatStream, watchChatStream } from './stream.js';
 import { loadSessionHistory, getSessionId } from './session.js';
 import { initializeSidebar } from './sidebar.js';
 
@@ -187,6 +187,40 @@ function resizePrompt() {
     input.style.height = `${Math.min(input.scrollHeight, 170)}px`;
 }
 
+async function watchAssistantStream(streamId, response) {
+    let renderedText = '';
+    const loading = createLoadingIndicator();
+    response.contentElement.append(loading.element);
+
+    try {
+        const result = await watchChatStream({
+            streamId,
+            onEvent(type, data) {
+                if (type === 'ui_control') {
+                    if (data.state === 'thinking') loading.setLabel('The model is generating a response…');
+                    if (data.state === 'complete' || data.state === 'error') loading.remove();
+                } else if (type === 'delta') {
+                    loading.remove();
+                    renderedText += data.text;
+                    setAssistantContent(response, renderedText);
+                } else if (type === 'streamaddon') {
+                    renderStreamDetails(response.details, data);
+                } else if (type === 'done') {
+                    renderedText = data.message.content;
+                    setAssistantContent(response, renderedText);
+                }
+            },
+        });
+        loading.remove();
+        if (!renderedText) setAssistantContent(response, result.message.content);
+    } catch (error) {
+        loading.remove();
+        response.item.classList.add('error');
+        response.contentElement.className = 'message-content';
+        response.contentElement.textContent = error.message;
+    }
+}
+
 input.addEventListener('input', () => {
     resizePrompt();
     updateSendButton();
@@ -211,31 +245,14 @@ form.addEventListener('submit', async event => {
     input.value = '';
     resizePrompt();
     const response = addMessage('assistant', '');
-    let renderedText = '';
-    const loading = createLoadingIndicator();
-    response.contentElement.append(loading.element);
 
     try {
-        const result = await watchChatStream({
+        const streamId = await startChatStream({
             conversationId,
             message: messageText,
-            onEvent(type, data) {
-                if (type === 'ui_control') {
-                    if (data.state === 'thinking') loading.setLabel('The model is generating a response…');
-                    if (data.state === 'complete' || data.state === 'error') loading.remove();
-                } else if (type === 'delta') {
-                    loading.remove();
-                    renderedText += data.text;
-                    setAssistantContent(response, renderedText);
-                } else if (type === 'streamaddon') {
-                    renderStreamDetails(response.details, data);
-                }
-            },
         });
-        loading.remove();
-        if (!renderedText) setAssistantContent(response, result.message.content);
+        await watchAssistantStream(streamId, response);
     } catch (error) {
-        loading.remove();
         response.item.classList.add('error');
         response.contentElement.className = 'message-content';
         response.contentElement.textContent = error.message;
@@ -248,6 +265,23 @@ form.addEventListener('submit', async event => {
         });
     }
 });
+
+async function resumeActiveStream() {
+    const result = await api(
+        `/api/streams/active?conversationId=${encodeURIComponent(conversationId)}`,
+    );
+    if (!result.streamId) return;
+
+    busy = true;
+    updateSendButton();
+    setEmptyChatLayout(false);
+    await watchAssistantStream(result.streamId, addMessage('assistant', ''));
+    busy = false;
+    updateSendButton();
+    sidebar.loadConversations().catch(error => {
+        console.error('[WEBUI] Could not refresh conversation list:', error);
+    });
+}
 
 modelButton.addEventListener('click', async () => {
     const opening = modelMenu.hidden;
@@ -284,7 +318,10 @@ Promise.all([
         addMessage,
         renderStreamDetails,
         scrollToLatest,
-    }).then(isEmpty => setEmptyChatLayout(isEmpty)).catch(error => {
+    }).then(async isEmpty => {
+        setEmptyChatLayout(isEmpty);
+        await resumeActiveStream();
+    }).catch(error => {
         setEmptyChatLayout(false);
         throw error;
     }),

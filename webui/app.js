@@ -8,7 +8,7 @@ const ROOT = path.join(__dirname, '..');
 require('dotenv').config({ path: path.join(ROOT, '.env') });
 
 const database = require('../core/database');
-const { requestJson } = require('../platform/shared/utils/agentBridge');
+const { requestJson } = require('./bridge');
 const { StreamManager } = require('./streamManager');
 
 const PLATFORM = 'webui';
@@ -123,6 +123,13 @@ function createWebUiServer({
                     path.join(__dirname, 'js', `${assetMatch[1]}.js`),
                     'text/javascript; charset=utf-8',
                 );
+                return;
+            }
+            if (request.method === 'GET' && url.pathname === '/api/streams/active') {
+                const conversationId = validateConversationId(url.searchParams.get('conversationId'));
+                sendJson(response, 200, {
+                    streamId: streamManager.activeForConversation(conversationId),
+                });
                 return;
             }
             if (request.method === 'GET' && url.pathname.startsWith('/api/streams/')) {
@@ -361,7 +368,7 @@ function createWebUiServer({
                             },
                             messages: history.map(({ role, content }) => ({ role, content })),
                         },
-                    });
+                    }, conversationId);
                     const assistantMessage = {
                         platform: PLATFORM,
                         conversation_id: conversationId,
@@ -422,11 +429,19 @@ function pythonExecutable() {
 }
 
 async function ensureBridge() {
+    const webUiPort = Number(process.env.WEBUI_PORT) || 3000;
+    const bridgePort = Number(process.env.WEBUI_BRIDGE_PORT) || 5002;
+    if (!process.env.WEBUI_BRIDGE_URL && webUiPort === bridgePort) {
+        throw new Error('WEBUI_PORT and WEBUI_BRIDGE_PORT must be different.');
+    }
     try {
         await requestJson('/health', { timeoutMs: 1_000 });
         return null;
-    } catch {
-        const child = spawn(pythonExecutable(), ['-m', 'src.discord_bridge'], {
+    } catch (error) {
+        if (process.env.WEBUI_BRIDGE_URL) {
+            throw new Error(`Configured WebUI inference bridge is unavailable: ${error.message}`);
+        }
+        const child = spawn(pythonExecutable(), ['-m', 'src.webui_bridge'], {
             cwd: ROOT,
             env: process.env,
             stdio: 'inherit',
@@ -438,7 +453,7 @@ async function ensureBridge() {
         while (Date.now() < deadline) {
             if (startupError) throw startupError;
             if (child.exitCode !== null) {
-                throw new Error(`Inference bridge exited during startup (code ${child.exitCode}).`);
+                throw new Error(`WebUI inference bridge exited during startup (code ${child.exitCode}).`);
             }
             try {
                 await requestJson('/health', { timeoutMs: 1_000 });
@@ -448,15 +463,13 @@ async function ensureBridge() {
             }
         }
         child.kill();
-        throw new Error('Inference bridge did not become ready within 30 seconds.');
+        throw new Error('WebUI inference bridge did not become ready within 30 seconds.');
     }
 }
 
 async function start() {
     await database.init();
-    const bridgeProcess = process.env.ZEUS_SUPERVISED_BRIDGE === 'true'
-        ? null
-        : await ensureBridge();
+    const bridgeProcess = await ensureBridge();
     const server = createWebUiServer();
     const host = process.env.WEBUI_HOST || '127.0.0.1';
     const port = Number(process.env.WEBUI_PORT) || 3000;

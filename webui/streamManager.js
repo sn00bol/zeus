@@ -10,7 +10,7 @@ class StreamManager {
         this.streams = new Map();
     }
 
-    start(task) {
+    start(task, conversationId = null) {
         this.prune();
         if (this.streams.size >= this.maxStreams) {
             const completed = [...this.streams.entries()]
@@ -30,6 +30,7 @@ class StreamManager {
             nextEventId: 1,
             completedAt: null,
             tail: '',
+            conversationId,
         };
         const streamId = randomUUID();
         this.streams.set(streamId, stream);
@@ -58,6 +59,16 @@ class StreamManager {
     has(streamId) {
         this.prune();
         return this.streams.has(streamId);
+    }
+
+    activeForConversation(conversationId) {
+        this.prune();
+        for (const [streamId, stream] of this.streams) {
+            if (stream.conversationId === conversationId && stream.completedAt === null) {
+                return streamId;
+            }
+        }
+        return null;
     }
 
     subscribe(streamId, response, lastEventId = 0) {
