@@ -116,6 +116,10 @@ function createWebUiServer({
                 sendStatic(response, path.join(__dirname, 'index.html'), 'text/html; charset=utf-8');
                 return;
             }
+            if (request.method === 'GET' && url.pathname === '/zeus.ico') {
+                sendStatic(response, path.join(__dirname, 'zeus.ico'), 'image/x-icon');
+                return;
+            }
             const assetMatch = url.pathname.match(/^\/js\/(chat|render|loading|stream|streamaddon|model|sidebar|session|theme)\.js$/);
             if (request.method === 'GET' && assetMatch) {
                 sendStatic(

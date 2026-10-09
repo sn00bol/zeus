@@ -30,8 +30,28 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             }));
         }).on('error', reject);
     });
+    const requestRaw = path => new Promise((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port, path }, response => {
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk));
+            response.on('end', () => resolve({
+                status: response.statusCode,
+                headers: response.headers,
+                body: Buffer.concat(chunks),
+            }));
+        }).on('error', reject);
+    });
 
     try {
+        const page = await requestRaw('/');
+        assert.equal(page.status, 200);
+        assert.match(page.body.toString('utf8'), /<link rel="icon" href="\/zeus\.ico"/);
+
+        const icon = await requestRaw('/zeus.ico');
+        assert.equal(icon.status, 200);
+        assert.equal(icon.headers['content-type'], 'image/x-icon');
+        assert.deepEqual([...icon.body.subarray(0, 4)], [0, 0, 1, 0]);
+
         const status = await request('/api/status');
         assert.equal(status.status, 200);
         assert.deepEqual(requests, ['/models', '/status']);
