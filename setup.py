@@ -412,6 +412,7 @@ def setup_project(
             "ZEUS_MODEL": existing.get("ZEUS_MODEL", ""),
             "LLM_HOST": existing.get("LLM_HOST", "localhost"),
             "LLM_PORT": existing.get("LLM_PORT", "11434"),
+            "OLLAMA_API_KEY": existing.get("OLLAMA_API_KEY", ""),
             "DB_HOST": existing.get("DB_HOST", "127.0.0.1"),
             "DB_PORT": existing.get("DB_PORT", "5432"),
             "DB_NAME": existing.get("DB_NAME", "zeus"),
@@ -467,12 +468,20 @@ def setup_project(
             input_fn,
         )
 
+        ollama_token = existing.get("OLLAMA_API_KEY", "")
+        if provider == "ollama":
+            default_hint = f" [{ollama_token[:6]}...]" if ollama_token else ""
+            ollama_input = prompt(f"Ollama API Token (optional, press Enter to skip){default_hint}: ").strip()
+            if ollama_input:
+                ollama_token = ollama_input
+
         config = {
             "PLATFORM": platform,
             "ZEUS_PROVIDER": provider,
             "ZEUS_MODEL": model,
             "LLM_HOST": host,
             "LLM_PORT": str(port),
+            "OLLAMA_API_KEY": ollama_token,
             "DB_HOST": existing.get("DB_HOST", "127.0.0.1"),
             "DB_PORT": existing.get("DB_PORT", "5432"),
             "DB_NAME": existing.get("DB_NAME", "zeus"),

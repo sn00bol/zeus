@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Optional
-from router.router import Router, InferenceRequest, InferenceResponse
+from router.router import Router, InferenceRequest, InferenceResponse, Message
 
 log = logging.getLogger(__name__)
 
+
 class RequestRouter:
     """
-    The RequestRouter acts as the entry point for all platform requests.
-    It handles the transformation of platform-specific data into
-    InferenceRequests and manages the communication with the backend Router.
+    Entry point facade for platform requests.
+
+    Transforms platform-specific payloads into InferenceRequests and manages
+    dispatching through the central Router.
     """
 
     def __init__(self, router: Router):
@@ -27,17 +29,10 @@ class RequestRouter:
         extra_params: Optional[dict[str, Any]] = None,
     ) -> InferenceResponse:
         """
-        Main entry point to process a request from any platform.
+        Process an incoming chat request from any supported platform.
         """
         try:
-            # 1. Construct the InferenceRequest
-            # Note: In a real scenario, you'd fetch conversation history from MemoryStore here.
-            messages = [
-                {"role": "user", "content": user_message}
-            ]
-            
-            from router.router import Message
-            formatted_messages = [Message(role=m["role"], content=m["content"]) for m in messages]
+            formatted_messages = [Message(role="user", content=user_message)]
 
             request = InferenceRequest(
                 messages=formatted_messages,
@@ -47,22 +42,22 @@ class RequestRouter:
                 extra=extra_params or {},
             )
 
-            # 2. Call the backend router
-            log.info(f"Routing request from {platform} (user: {user_id})")
+            log.info("Routing request from %s (user: %s, provider: %s)", platform, user_id, provider)
             response = await self.router.route(request)
-            
             return response
 
         except Exception as e:
-            log.exception(f"Error in RequestRouter while handling request from {platform}: {e}")
+            log.exception("Error in RequestRouter while handling request from %s: %s", platform, e)
             return InferenceResponse(
                 content="An error occurred while processing your request.",
                 model="error",
                 provider="error",
-                raw={"error": str(e)}
+                raw={"error": str(e)},
             )
 
+
 _instance: Optional[RequestRouter] = None
+
 
 def get_request_router(router: Router) -> RequestRouter:
     global _instance

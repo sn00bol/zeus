@@ -3,12 +3,14 @@ router/router — Central request router between platforms and LLM backends.
 
 Flow
 ----
-Platform (Discord, Telegram, …)
+Platform (Discord, WebUI, Telegram, …)
     → InferenceRequest
     → Router.route()
-        → selects BaseProvider
+        → analyzes task complexity via DynamicDispatcher
+        → selects optimal BaseProvider & handles automatic failover
         → calls provider's OpenAI-compatible REST endpoint
         → wraps response in InferenceResponse
+        → publishes real-time lifecycle events to EventBroker
     → Platform receives InferenceResponse
 
 The Router is intentionally stateless per-request; provider instances are
@@ -19,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
@@ -33,6 +36,11 @@ from core.session import Session
 from core.session_manager import SessionManager
 from src.provider import BaseProvider
 from src.skills.personality import Personality
+
+from router.broker import EventBroker, get_event_broker
+from router.dispatcher import DynamicDispatcher
+from router.health import HealthMonitor, get_health_monitor
+from router.security import SecurityManager, get_security_manager
 
 log = logging.getLogger(__name__)
 
@@ -58,19 +66,19 @@ class InferenceRequest:
         Conversation history including the current user turn.
         The router prepends the personality system message if none is present.
     model : str | None
-        Explicit model id to use.  If None, the router picks the first
+        Explicit model id to use. If None, the router picks the first
         available model on the active provider.
     provider_name : str | None
-        Which backend to use (``"ollama"``, ``"lmstudio"``, ``"llamacpp"``).
-        Defaults to the ``ZEUS_PROVIDER`` env var or ``"ollama"``.
+        Which backend to use ("ollama", "lmstudio", "llamacpp").
+        Defaults to the ZEUS_PROVIDER env var or dynamic complexity routing.
     stream : bool
         Whether to request a streaming response from the backend.
     temperature : float | None
         Override the personality's temperature.
     max_tokens : int | None
-        Cap on tokens to generate.  If None, uses the provider's model limit.
+        Cap on tokens to generate. If None, uses the provider's model limit.
     platform : str
-        Source platform tag (``"discord"``, ``"telegram"``, …).  Informational.
+        Source platform tag ("discord", "telegram", "webui"). Informational.
     extra : dict
         Arbitrary extra fields forwarded verbatim to the backend.
     """
@@ -108,15 +116,8 @@ class InferenceResponse:
 
 class Router:
     """
-    Manages a pool of provider instances and routes InferenceRequests to
-    the correct backend.
-
-    Usage
-    -----
-    ::
-
-        router = Router()
-        response = await router.route(request)
+    Manages a pool of provider instances, routes InferenceRequests to
+    the correct backend, and coordinates events, dynamic routing, and security.
     """
 
     def __init__(
@@ -124,23 +125,38 @@ class Router:
         model_manager: ModelManager | None = None,
         memory_store: MemoryStore | None = None,
         session_manager: SessionManager | None = None,
+        broker: EventBroker | None = None,
+        dispatcher: DynamicDispatcher | None = None,
+        health_monitor: HealthMonitor | None = None,
+        security_manager: SecurityManager | None = None,
     ) -> None:
         self.memory_store = memory_store
         self.session_manager = session_manager
         self.model_manager = model_manager or ModelManager(memory_store=memory_store)
+        self.broker = broker or get_event_broker()
+        self.dispatcher = dispatcher or DynamicDispatcher(self.model_manager, broker=self.broker)
+        self.health_monitor = health_monitor or get_health_monitor(
+            database=getattr(memory_store, "_database", None),
+            model_manager=self.model_manager,
+        )
+        self.security_manager = security_manager or get_security_manager()
         self._http_client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Return a shared AsyncClient to reuse TCP connections."""
         if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(timeout=120, limits=httpx.Limits(max_connections=100, max_keepalive_connections=20))
+            self._http_client = httpx.AsyncClient(
+                timeout=120,
+                limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+            )
         return self._http_client
 
     async def shutdown(self) -> None:
-        """Close the shared HTTP client."""
+        """Close the shared HTTP client and stop background tasks."""
         if self._http_client:
             await self._http_client.aclose()
-
+        if self.health_monitor:
+            await self.health_monitor.stop()
 
     # ------------------------------------------------------------------
     # Provider pool
@@ -166,31 +182,102 @@ class Router:
         """
         Route *request* to the appropriate LLM backend and return the response.
 
-        Selection order
-        ~~~~~~~~~~~~~~~
-        1. ``request.provider_name`` (explicit)
-        2. ``ZEUS_PROVIDER`` environment variable
-        3. First reachable provider from the discovery scan
+        Leverages DynamicDispatcher for complexity analysis and multi-provider failover.
         """
-        context = await self.model_manager.resolve(request)
-        client = await self._get_client()
+        start_time = time.perf_counter()
+        platform = getattr(request, "platform", "unknown")
+        req_model = getattr(request, "model", None)
+        req_provider = getattr(request, "provider_name", None)
+        req_messages = getattr(request, "messages", [])
+        req_stream = getattr(request, "stream", False)
+        req_extra = getattr(request, "extra", {})
 
-        # Call backend
-        raw = await self._call_backend(
-            provider=context.provider,
-            model_id=context.model_name,
-            messages=context.messages,
-            temperature=context.temperature,
-            max_tokens=context.max_tokens,
-            stream=request.stream,
-            extra=request.extra,
-            api_token=context.api_token,
-            client=client,
+        await self.broker.publish(
+            "inference.started",
+            {
+                "platform": platform,
+                "model": req_model,
+                "provider": req_provider,
+                "message_count": len(req_messages),
+            },
         )
 
-        response = self._parse_response(raw, context.provider_name, context.model_name)
-        await self._record_response(request, context, response)
-        return response
+        try:
+            context = await self.model_manager.resolve(request)
+            client = await self._get_client()
+
+            # Analyze complexity and decide provider candidates
+            decision = await self.dispatcher.dispatch(
+                messages=req_messages,
+                requested_provider=req_provider or context.provider_name,
+                requested_model=req_model or context.model_name,
+            )
+
+            async def _execute_provider(p_name: str, m_name: str | None) -> tuple[dict[str, Any], ModelContext]:
+                if p_name == context.provider_name and (m_name is None or m_name == context.model_name):
+                    active_context = context
+                else:
+                    alt_req = InferenceRequest(
+                        messages=req_messages,
+                        model=m_name,
+                        provider_name=p_name,
+                        stream=req_stream,
+                        temperature=getattr(request, "temperature", None),
+                        max_tokens=getattr(request, "max_tokens", None),
+                        personality=getattr(request, "personality", None),
+                        platform=platform,
+                        extra=req_extra,
+                        session=getattr(request, "session", None),
+                    )
+                    active_context = await self.model_manager.resolve(alt_req)
+
+                raw = await self._call_backend(
+                    provider=active_context.provider,
+                    model_id=active_context.model_name,
+                    messages=active_context.messages,
+                    temperature=active_context.temperature,
+                    max_tokens=active_context.max_tokens,
+                    stream=req_stream,
+                    extra=req_extra,
+                    api_token=active_context.api_token,
+                    client=client,
+                )
+                return raw, active_context
+
+            (raw_response, final_context), effective_provider = await self.dispatcher.execute_with_failover(
+                decision,
+                _execute_provider,
+            )
+
+            response = self._parse_response(
+                raw_response, effective_provider, final_context.model_name
+            )
+            await self._record_response(request, final_context, response)
+
+            latency = round((time.perf_counter() - start_time) * 1000.0, 2)
+            await self.broker.publish(
+                "inference.completed",
+                {
+                    "platform": platform,
+                    "provider": response.provider,
+                    "model": response.model,
+                    "prompt_tokens": response.prompt_tokens,
+                    "completion_tokens": response.completion_tokens,
+                    "latency_ms": latency,
+                },
+            )
+            return response
+
+        except Exception as exc:
+            await self.broker.publish(
+                "inference.failed",
+                {
+                    "platform": platform,
+                    "provider": req_provider,
+                    "error": str(exc),
+                },
+            )
+            raise
 
     async def route_stream(
         self,
@@ -198,30 +285,64 @@ class Router:
         on_delta: Callable[[str], Awaitable[None]],
     ) -> InferenceResponse:
         """Stream model deltas to a callback and return the completed response."""
-        context = await self.model_manager.resolve(request)
-        client = await self._get_client()
-        content, usage, finish_reason, actual_model = await self._stream_backend(
-            provider=context.provider,
-            model_id=context.model_name,
-            messages=context.messages,
-            temperature=context.temperature,
-            max_tokens=context.max_tokens,
-            extra=request.extra,
-            client=client,
-            api_token=context.api_token,
-            on_delta=on_delta,
+        start_time = time.perf_counter()
+        platform = getattr(request, "platform", "unknown")
+        req_model = getattr(request, "model", None)
+        req_provider = getattr(request, "provider_name", None)
+        req_extra = getattr(request, "extra", {})
+
+        await self.broker.publish(
+            "inference.stream.started",
+            {
+                "platform": platform,
+                "model": req_model,
+                "provider": req_provider,
+            },
         )
-        response = InferenceResponse(
-            content=content,
-            model=actual_model,
-            provider=context.provider_name,
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=usage.get("completion_tokens", 0),
-            finish_reason=finish_reason,
-            raw={"stream": True},
-        )
-        await self._record_response(request, context, response)
-        return response
+
+        try:
+            context = await self.model_manager.resolve(request)
+            client = await self._get_client()
+            content, usage, finish_reason, actual_model = await self._stream_backend(
+                provider=context.provider,
+                model_id=context.model_name,
+                messages=context.messages,
+                temperature=context.temperature,
+                max_tokens=context.max_tokens,
+                extra=req_extra,
+                client=client,
+                api_token=context.api_token,
+                on_delta=on_delta,
+            )
+            response = InferenceResponse(
+                content=content,
+                model=actual_model,
+                provider=context.provider_name,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                finish_reason=finish_reason,
+                raw={"stream": True},
+            )
+            await self._record_response(request, context, response)
+
+            latency = round((time.perf_counter() - start_time) * 1000.0, 2)
+            await self.broker.publish(
+                "inference.stream.completed",
+                {
+                    "platform": platform,
+                    "provider": response.provider,
+                    "model": response.model,
+                    "latency_ms": latency,
+                },
+            )
+            return response
+
+        except Exception as exc:
+            await self.broker.publish(
+                "inference.stream.failed",
+                {"platform": platform, "error": str(exc)},
+            )
+            raise
 
     async def _record_response(
         self,
@@ -279,15 +400,12 @@ class Router:
         if httpx is None:
             raise RuntimeError("httpx is required: pip install httpx")
 
-        # All three supported providers expose a /chat/completions-compatible path
         ep = provider.endpoint
         base = ep.base_url
 
-        # Normalise base URL to include /v1 if needed
         if provider.name == "ollama":
             url = f"{base}/v1/chat/completions"
         else:
-            # lmstudio and llamacpp already include /v1 in base_url
             chat_path = "/chat/completions"
             url = base.rstrip("/") + chat_path
 

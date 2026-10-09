@@ -71,6 +71,12 @@ class AgentRunner:
             raise AgentQueueFull("The agent run queue is full. Try again shortly.") from exc
         self._runs[run.run_id] = run
         self._prune_completed_runs()
+
+        # Emit broker event if broker is available
+        broker = getattr(self._router, "broker", None)
+        if broker is not None:
+            asyncio.create_task(broker.publish("agent.queued", {"run_id": run.run_id, "platform": request.platform}))
+
         return run
 
     def get(self, run_id: str) -> AgentRun | None:
@@ -99,21 +105,38 @@ class AgentRunner:
         }
 
     async def _run_loop(self) -> None:
+        broker = getattr(self._router, "broker", None)
         while True:
             run = await self._queue.get()
             self._current = run
             run.status = "running"
+            if broker is not None:
+                await broker.publish("agent.started", {"run_id": run.run_id})
+
             try:
                 run.result = await self._router.route(run.request)
                 run.status = "completed"
+                if broker is not None:
+                    await broker.publish(
+                        "agent.completed",
+                        {
+                            "run_id": run.run_id,
+                            "model": run.result.model,
+                            "provider": run.result.provider,
+                        },
+                    )
             except asyncio.CancelledError:
                 run.status = "failed"
                 run.error = "Agent runner stopped before the run completed."
+                if broker is not None:
+                    await broker.publish("agent.failed", {"run_id": run.run_id, "error": run.error})
                 raise
             except Exception as exc:
                 log.exception("Agent run %s failed", run.run_id)
                 run.status = "failed"
                 run.error = str(exc)
+                if broker is not None:
+                    await broker.publish("agent.failed", {"run_id": run.run_id, "error": run.error})
             finally:
                 self._current = None
                 self._queue.task_done()

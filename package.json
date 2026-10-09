@@ -14,7 +14,7 @@
     "santaa"
   ],
   "author": "sn00bol",
-  "license": "Apache-2.0",
+  "license": "GPL-3.0-only",
   "type": "commonjs",
   "dependencies": {
     "discord.js": "^14.19.0",

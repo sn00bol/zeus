@@ -40,10 +40,9 @@ Provider default ports:
 
 | Variable | Description |
 | --- | --- |
-| `OLLAMA_API_KEY` / `OLLAMA_TOKEN` | Optional Ollama endpoint credential. |
-| `LMSTUDIO_API_KEY` / `LMSTUDIO_TOKEN` | Optional LM Studio endpoint credential. |
-| `LLAMACPP_API_KEY` / `LLAMACPP_TOKEN` | Optional llama.cpp endpoint credential. |
-| `ZEUS_MODEL_TOKEN` | Fallback credential used if the selected provider's key and token are not set. |
+| `OLLAMA_API_KEY` / `OLLAMA_TOKEN` | Optional Ollama endpoint credential (e.g. for remote or authenticated Ollama servers). |
+
+> Note: LM Studio and llama.cpp local providers do not require or support API keys, and generic model tokens are not required.
 
 ## WebUI
 

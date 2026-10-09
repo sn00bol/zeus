@@ -165,11 +165,12 @@ class ModelManager:
 
     @staticmethod
     def get_access_token(provider_name: str) -> str | None:
-        name = provider_name.upper().replace("-", "_")
-        for key in (f"{name}_API_KEY", f"{name}_TOKEN", "ZEUS_MODEL_TOKEN"):
-            token = os.environ.get(key)
-            if token:
-                return token
+        name = provider_name.lower().replace("-", "_")
+        if name == "ollama":
+            for key in ("OLLAMA_API_KEY", "OLLAMA_TOKEN"):
+                token = os.environ.get(key)
+                if token:
+                    return token
         return None
 
     async def resolve(self, request: _InferenceRequestLike) -> ModelContext:

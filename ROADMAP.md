@@ -15,6 +15,7 @@ Root
 - core/                       -> ZEUS Core
 - logs/                       -> runtime log output
 - src/                        -> main codebase
+- webui                       -> ZEUS WebUI
 - tests/                      -> unit tests
 
 src/
