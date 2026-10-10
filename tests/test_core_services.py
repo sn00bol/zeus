@@ -112,7 +112,6 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             provider_name="ollama",
             model="llama-test",
             messages=[SimpleNamespace(role="user", content="hello")],
-            personality=None,
             temperature=None,
             max_tokens=None,
             session=None,
@@ -222,7 +221,6 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             provider_name="ollama",
             model=None,
             messages=[SimpleNamespace(role="user", content="hello")],
-            personality=None,
             temperature=None,
             max_tokens=None,
             session=None,
@@ -249,7 +247,6 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             provider_name="ollama",
             model=None,
             messages=[SimpleNamespace(role="user", content="hello")],
-            personality=None,
             temperature=None,
             max_tokens=None,
             session=None,
@@ -268,7 +265,6 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             provider_name="ollama",
             model=None,
             messages=[SimpleNamespace(role="user", content="hello")],
-            personality=None,
             temperature=None,
             max_tokens=None,
             session=None,
@@ -280,7 +276,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.model_name, "llama-test")
         self.assertEqual(provider.list_calls, 1)
 
-    async def test_memory_is_added_to_context_without_replacing_personality(self) -> None:
+    async def test_memory_is_added_to_context_without_replacing_soul(self) -> None:
         provider = FakeProvider()
         database = FakeMemoryDatabase()
         memory = MemoryStore(database)  # type: ignore[arg-type]
@@ -297,7 +293,6 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             provider_name="ollama",
             model="llama-test",
             messages=[SimpleNamespace(role="user", content="How do I add a Discord bot command?")],
-            personality=None,
             temperature=None,
             max_tokens=None,
             session=SimpleNamespace(
@@ -309,7 +304,9 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
         context = await manager.resolve(request)
         self.assertEqual(context.messages[0]["role"], "system")
-        self.assertIn("Zeus", context.messages[0]["content"])
+        self.assertIn("ZEUS", context.messages[0]["content"])
+        self.assertIn("Safety", context.messages[0]["content"])
+        self.assertIn("Skill workflow", context.messages[0]["content"])
         self.assertIn("Relevant memories", context.messages[1]["content"])
         self.assertIn("Discord bot setup", context.messages[1]["content"])
         self.assertEqual(database.fetch_calls[0][1][0:2], ("discord", "private-user"))

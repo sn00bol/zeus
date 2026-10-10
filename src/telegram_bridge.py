@@ -31,7 +31,6 @@ from core.session_manager import SessionManager
 from core.version import get_version
 from router.agent import AgentQueueFull, AgentRunner
 from router.router import InferenceRequest, InferenceResponse, Message, Router
-from src.skills.personality import get_personality
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,8 +106,6 @@ def _parse_messages(raw: Any) -> list[Message]:
 
 def _inference_request(body: dict[str, Any]) -> InferenceRequest:
     messages = _parse_messages(body.get("messages"))
-    personality_name = body.get("personality")
-    personality = get_personality(personality_name) if personality_name else None
     return InferenceRequest(
         messages=messages,
         model=body.get("model") or None,
@@ -116,7 +113,6 @@ def _inference_request(body: dict[str, Any]) -> InferenceRequest:
         stream=bool(body.get("stream", False)),
         temperature=body.get("temperature"),
         max_tokens=body.get("max_tokens"),
-        personality=personality,
         platform=str(body.get("platform") or "telegram"),
         extra={
             key: value for key, value in body.items()
@@ -299,7 +295,7 @@ class BridgeApplication:
                 return
             status = 202 if payload["status"] in {"queued", "running"} else 200
             await _send_json(send, payload, status=status)
-            return
+            return
 
         if method == "POST" and path in {"/infer", "/agent/run"}:
             try:

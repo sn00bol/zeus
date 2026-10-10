@@ -1,9 +1,5 @@
 ZEUS Roadmap
 
-Goal
-- Keep this as a practical map of the codebase.
-- Show main folders and important files only (not every file).
-
 Root
 - setup.py                    -> Setup scripts auto install dependencies project
 - requirements.txt            -> python dependencies for ZEUS
@@ -20,15 +16,14 @@ Root
 
 src/
 - provider/                   -> LLM Config provider
-- skills/                     -> AI Agents skill
+- skills/                     -> SOUL, SAFETY, SKILL.md, catalog, and skill runtime
 - tools/                      -> AI Agents tools
 
 
-Database
-- PostgreSQL (primary) with in-memory fallback for development
-- Graceful degradation when PostgreSQL is unavailable
+Database: PostgresSQL
 
 TODOS:
+- Add AI Agents sandbox enviroments to test running python code, testing, debug,...
 - Add random text for fun when start new chat
 - Improving webui and menu bar, format text
 - Add ZEUS Webui settings, model selection more advance

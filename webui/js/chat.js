@@ -1,4 +1,4 @@
-import { createLoadingIndicator } from './loading.js';
+import { createLoadingIndicator, createFinishedThinking } from './loading.js';
 import { getModelChoices, setModelChoice } from './model.js';
 import { renderMessageContent } from './render.js';
 import { addCodeCopyControls, renderStreamDetails } from './streamaddon.js';
@@ -22,10 +22,39 @@ const sendButton = document.getElementById('send-button');
 const modelButton = document.getElementById('model-picker-button');
 const modelLabel = document.getElementById('model-picker-label');
 const modelMenu = document.getElementById('model-picker-menu');
+const thinkingModeButton = document.getElementById('thinking-mode-button');
+const thinkingModeLabel = document.getElementById('thinking-mode-label');
 let busy = false;
 let modelChoices = [];
 let modelPreference = null;
 let runtimeModel = null;
+let thinkingMode = localStorage.getItem('zeus.webui.thinking_mode') || 'auto'; // 'auto' | 'on' | 'off'
+
+function updateThinkingModeUI() {
+    if (!thinkingModeButton || !thinkingModeLabel) return;
+    thinkingModeLabel.textContent = `Think: ${thinkingMode.charAt(0).toUpperCase() + thinkingMode.slice(1)}`;
+    thinkingModeButton.setAttribute('data-mode', thinkingMode);
+    thinkingModeButton.classList.toggle('active', thinkingMode === 'on');
+    thinkingModeButton.classList.toggle('disabled-mode', thinkingMode === 'off');
+    thinkingModeButton.title = `Thinking mode: ${thinkingMode} (Click to switch: Auto / On / Off)`;
+}
+
+if (thinkingModeButton) {
+    updateThinkingModeUI();
+    thinkingModeButton.addEventListener('click', () => {
+        if (thinkingMode === 'auto') thinkingMode = 'on';
+        else if (thinkingMode === 'on') thinkingMode = 'off';
+        else thinkingMode = 'auto';
+        localStorage.setItem('zeus.webui.thinking_mode', thinkingMode);
+        updateThinkingModeUI();
+    });
+}
+
+function getThinkParam() {
+    if (thinkingMode === 'on') return true;
+    if (thinkingMode === 'off') return false;
+    return undefined;
+}
 const sidebar = initializeSidebar({ api, sessionId: conversationId });
 
 function setEmptyChatLayout(empty) {
@@ -44,7 +73,7 @@ function scrollToLatest() {
     scrollElement.scrollTop = scrollElement.scrollHeight;
 }
 
-function addMessage(role, content, { error = false } = {}) {
+function addMessage(role, content, { error = false, thinking: thinkingText = '' } = {}) {
     const item = document.createElement('article');
     item.className = `message ${role}${error ? ' error' : ''}`;
     const body = document.createElement('div');
@@ -57,14 +86,24 @@ function addMessage(role, content, { error = false } = {}) {
     } else {
         contentElement.textContent = content;
     }
+    const thinking = document.createElement('div');
+    thinking.className = 'message-thinking';
+    thinking.hidden = true;
+    if (role === 'assistant' && thinkingText) {
+        const finishedNode = createFinishedThinking(thinkingText);
+        if (finishedNode) {
+            thinking.append(finishedNode);
+            thinking.hidden = false;
+        }
+    }
     const details = document.createElement('div');
     details.className = 'stream-details';
-    body.append(contentElement, details);
+    body.append(thinking, contentElement, details);
     item.append(body);
     messagesElement.append(item);
     welcomeElement.hidden = true;
     scrollToLatest();
-    return { item, contentElement, details };
+    return { item, thinking, contentElement, details };
 }
 
 function setAssistantContent(message, content) {
@@ -190,31 +229,40 @@ function resizePrompt() {
 async function watchAssistantStream(streamId, response) {
     let renderedText = '';
     const loading = createLoadingIndicator();
-    response.contentElement.append(loading.element);
+    response.thinking.hidden = false;
+    response.thinking.replaceChildren(loading.element);
 
     try {
         const result = await watchChatStream({
             streamId,
             onEvent(type, data) {
                 if (type === 'ui_control') {
-                    if (data.state === 'thinking') loading.setLabel('The model is generating a response…');
-                    if (data.state === 'complete' || data.state === 'error') loading.remove();
+                    if (data.state === 'thinking') loading.setLabel('Thinking…');
+                    if (data.state === 'complete' || data.state === 'error') loading.finish();
+                } else if (type === 'thinking') {
+                    loading.appendThinking(data.text || '');
+                    scrollToLatest();
                 } else if (type === 'delta') {
-                    loading.remove();
+                    loading.finish();
                     renderedText += data.text;
                     setAssistantContent(response, renderedText);
                 } else if (type === 'streamaddon') {
                     renderStreamDetails(response.details, data);
                 } else if (type === 'done') {
+                    if (data.message?.thinking) loading.setThinking(data.message.thinking);
+                    loading.finish();
                     renderedText = data.message.content;
                     setAssistantContent(response, renderedText);
                 }
             },
         });
-        loading.remove();
+        if (result.message?.thinking) loading.setThinking(result.message.thinking);
+        loading.finish();
+        if (!loading.element.isConnected) response.thinking.hidden = true;
         if (!renderedText) setAssistantContent(response, result.message.content);
     } catch (error) {
         loading.remove();
+        response.thinking.hidden = true;
         response.item.classList.add('error');
         response.contentElement.className = 'message-content';
         response.contentElement.textContent = error.message;
@@ -250,6 +298,7 @@ form.addEventListener('submit', async event => {
         const streamId = await startChatStream({
             conversationId,
             message: messageText,
+            think: getThinkParam(),
         });
         await watchAssistantStream(streamId, response);
     } catch (error) {

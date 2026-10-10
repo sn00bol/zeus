@@ -15,7 +15,12 @@ from core.model import ModelManager
 from core.session import SessionStore
 from router.api_manager import ApiManager, WebSocketManager
 from router.broker import Event, EventBroker
-from router.dispatcher import DynamicDispatcher, TaskComplexity, analyze_task_complexity
+from router.dispatcher import (
+    DynamicDispatcher,
+    TaskComplexity,
+    analyze_task_complexity,
+    should_enable_thinking,
+)
 from router.health import HealthMonitor, ServiceStatus
 from router.router import InferenceRequest, InferenceResponse, Message, Router
 from router.security import SecurityManager, is_private_or_local_ip
@@ -114,6 +119,13 @@ class RouterDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(comp.level, "complex")
         self.assertTrue(comp.has_code)
         self.assertTrue(comp.reasoning_heavy)
+        self.assertFalse(should_enable_thinking(simple))
+        self.assertTrue(should_enable_thinking(comp))
+        moderate = analyze_task_complexity([
+            Message(role="user", content="Compare these approaches and evaluate the trade-offs."),
+        ])
+        self.assertEqual(moderate.level, "moderate")
+        self.assertTrue(should_enable_thinking(moderate))
 
     async def test_dynamic_failover_execution(self) -> None:
         broker = EventBroker()

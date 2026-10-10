@@ -35,10 +35,13 @@ from core.memory import MemoryStore
 from core.session import Session
 from core.session_manager import SessionManager
 from src.provider import BaseProvider
-from src.skills.personality import Personality
 
 from router.broker import EventBroker, get_event_broker
-from router.dispatcher import DynamicDispatcher
+from router.dispatcher import (
+    DynamicDispatcher,
+    analyze_task_complexity,
+    should_enable_thinking,
+)
 from router.health import HealthMonitor, get_health_monitor
 from router.security import SecurityManager, get_security_manager
 
@@ -64,7 +67,8 @@ class InferenceRequest:
     ----------
     messages : list[Message]
         Conversation history including the current user turn.
-        The router prepends the personality system message if none is present.
+        The router prepends SOUL, SAFETY, SKILL.md, and any auto-selected
+        skills if no system message is present.
     model : str | None
         Explicit model id to use. If None, the router picks the first
         available model on the active provider.
@@ -74,7 +78,7 @@ class InferenceRequest:
     stream : bool
         Whether to request a streaming response from the backend.
     temperature : float | None
-        Override the personality's temperature.
+        Sampling temperature. If None, the default skill runtime temperature is used.
     max_tokens : int | None
         Cap on tokens to generate. If None, uses the provider's model limit.
     platform : str
@@ -89,7 +93,6 @@ class InferenceRequest:
     stream: bool = False
     temperature: float | None = None
     max_tokens: int | None = None
-    personality: Personality | None = None
     platform: str = "unknown"
     extra: dict[str, Any] = field(default_factory=dict)
     session: Session | None = None
@@ -107,6 +110,7 @@ class InferenceResponse:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     finish_reason: str = "stop"
+    thinking: str = ""                  # model reasoning, when enabled
     raw: dict[str, Any] = field(default_factory=dict)  # full backend response
 
 
@@ -224,12 +228,19 @@ class Router:
                         stream=req_stream,
                         temperature=getattr(request, "temperature", None),
                         max_tokens=getattr(request, "max_tokens", None),
-                        personality=getattr(request, "personality", None),
                         platform=platform,
                         extra=req_extra,
                         session=getattr(request, "session", None),
                     )
                     active_context = await self.model_manager.resolve(alt_req)
+
+                explicit_think = req_extra.get("think")
+                if explicit_think is True or explicit_think in ("true", "True", "1", "on"):
+                    think_flag = True
+                elif explicit_think is False or explicit_think in ("false", "False", "0", "off"):
+                    think_flag = False
+                else:
+                    think_flag = should_enable_thinking(decision.complexity, model_name=active_context.model_name)
 
                 raw = await self._call_backend(
                     provider=active_context.provider,
@@ -241,6 +252,7 @@ class Router:
                     extra=req_extra,
                     api_token=active_context.api_token,
                     client=client,
+                    think=think_flag,
                 )
                 return raw, active_context
 
@@ -283,6 +295,7 @@ class Router:
         self,
         request: InferenceRequest,
         on_delta: Callable[[str], Awaitable[None]],
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
     ) -> InferenceResponse:
         """Stream model deltas to a callback and return the completed response."""
         start_time = time.perf_counter()
@@ -290,6 +303,18 @@ class Router:
         req_model = getattr(request, "model", None)
         req_provider = getattr(request, "provider_name", None)
         req_extra = getattr(request, "extra", {})
+        req_messages = getattr(request, "messages", [])
+
+        explicit_think = req_extra.get("think")
+        if explicit_think is True or explicit_think in ("true", "True", "1", "on"):
+            enable_thinking = True
+        elif explicit_think is False or explicit_think in ("false", "False", "0", "off"):
+            enable_thinking = False
+        else:
+            enable_thinking = should_enable_thinking(
+                analyze_task_complexity(req_messages),
+                model_name=req_model,
+            )
 
         await self.broker.publish(
             "inference.stream.started",
@@ -297,13 +322,17 @@ class Router:
                 "platform": platform,
                 "model": req_model,
                 "provider": req_provider,
+                "think": enable_thinking,
             },
         )
 
         try:
             context = await self.model_manager.resolve(request)
+            if explicit_think is None and not enable_thinking:
+                if should_enable_thinking(analyze_task_complexity(req_messages), model_name=context.model_name):
+                    enable_thinking = True
             client = await self._get_client()
-            content, usage, finish_reason, actual_model = await self._stream_backend(
+            content, thinking, usage, finish_reason, actual_model = await self._stream_backend(
                 provider=context.provider,
                 model_id=context.model_name,
                 messages=context.messages,
@@ -313,6 +342,8 @@ class Router:
                 client=client,
                 api_token=context.api_token,
                 on_delta=on_delta,
+                on_thinking=on_thinking,
+                think=enable_thinking,
             )
             response = InferenceResponse(
                 content=content,
@@ -321,6 +352,7 @@ class Router:
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
                 finish_reason=finish_reason,
+                thinking=thinking,
                 raw={"stream": True},
             )
             await self._record_response(request, context, response)
@@ -385,6 +417,43 @@ class Router:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _chat_url(provider: BaseProvider) -> str:
+        base = provider.endpoint.base_url.rstrip("/")
+        if provider.name == "ollama":
+            return f"{base}/v1/chat/completions"
+        return f"{base}/chat/completions"
+
+    @staticmethod
+    def _chat_payload(
+        provider: BaseProvider,
+        model_id: str,
+        messages: list[dict[str, str]],
+        temperature: float,
+        max_tokens: int | None,
+        extra: dict[str, Any],
+        *,
+        stream: bool,
+        think: bool,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": stream,
+            **extra,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if provider.name == "ollama":
+            payload.setdefault("think", think)
+        elif think:
+            template = dict(payload.get("chat_template_kwargs") or {})
+            template.setdefault("enable_thinking", True)
+            payload["chat_template_kwargs"] = template
+            payload.setdefault("think", True)
+        return payload
+
+    @staticmethod
     async def _call_backend(
         provider: BaseProvider,
         model_id: str,
@@ -395,33 +464,25 @@ class Router:
         extra: dict[str, Any],
         client: httpx.AsyncClient,
         api_token: str | None = None,
+        think: bool = False,
     ) -> dict[str, Any]:
         """POST to the provider's chat/completions endpoint."""
         if httpx is None:
             raise RuntimeError("httpx is required: pip install httpx")
 
-        ep = provider.endpoint
-        base = ep.base_url
-
-        if provider.name == "ollama":
-            url = f"{base}/v1/chat/completions"
-        else:
-            chat_path = "/chat/completions"
-            url = base.rstrip("/") + chat_path
-
-        payload: dict[str, Any] = {
-            "model": model_id,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": stream,
-            **extra,
-        }
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
-
+        payload = Router._chat_payload(
+            provider,
+            model_id,
+            messages,
+            temperature,
+            max_tokens,
+            extra,
+            stream=stream,
+            think=think,
+        )
         headers = {"Authorization": f"Bearer {api_token}"} if api_token else None
         resp = await client.post(
-            url,
+            Router._chat_url(provider),
             json=payload,
             headers=headers,
         )
@@ -439,36 +500,43 @@ class Router:
         client: httpx.AsyncClient,
         api_token: str | None,
         on_delta: Callable[[str], Awaitable[None]],
-    ) -> tuple[str, dict[str, int], str, str]:
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
+        think: bool = False,
+    ) -> tuple[str, str, dict[str, int], str, str]:
         if httpx is None:
             raise RuntimeError("httpx is required: pip install httpx")
 
-        base = provider.endpoint.base_url.rstrip("/")
-        url = (
-            f"{base}/v1/chat/completions"
-            if provider.name == "ollama"
-            else f"{base}/chat/completions"
+        payload = Router._chat_payload(
+            provider,
+            model_id,
+            messages,
+            temperature,
+            max_tokens,
+            extra,
+            stream=True,
+            think=think,
         )
-        payload: dict[str, Any] = {
-            "model": model_id,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-            **extra,
-        }
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
         headers = {"Authorization": f"Bearer {api_token}"} if api_token else None
 
-        parts: list[str] = []
+        content_parts: list[str] = []
+        thinking_parts: list[str] = []
+        tag_parser = _ThinkTagParser()
         usage = {"prompt_tokens": 0, "completion_tokens": 0}
         finish_reason = "stop"
         actual_model = model_id
         terminal_received = False
         stream_timeout = httpx.Timeout(connect=10, read=None, write=30, pool=10)
+
+        async def emit_thinking(text: str) -> None:
+            if not text:
+                return
+            thinking_parts.append(text)
+            if on_thinking is not None:
+                await on_thinking(text)
+
         async with client.stream(
             "POST",
-            url,
+            Router._chat_url(provider),
             json=payload,
             headers=headers,
             timeout=stream_timeout,
@@ -510,24 +578,54 @@ class Router:
                     finish_reason = str(chunk_finish_reason)
                     terminal_received = True
                 delta = choice.get("delta")
-                text = delta.get("content") if isinstance(delta, dict) else None
-                if isinstance(text, str) and text:
-                    parts.append(text)
-                    await on_delta(text)
+                message = choice.get("message")
+                if isinstance(delta, dict):
+                    source = delta
+                elif isinstance(message, dict):
+                    source = message
+                else:
+                    source = {}
+                await emit_thinking(_reasoning_text(source))
+                raw_content = source.get("content") if isinstance(source, dict) else None
+                if not isinstance(raw_content, str) or not raw_content:
+                    continue
+                visible, tagged = tag_parser.feed(raw_content)
+                await emit_thinking(tagged)
+                if visible:
+                    content_parts.append(visible)
+                    await on_delta(visible)
+        leftover_visible, leftover_think = tag_parser.flush()
+        await emit_thinking(leftover_think)
+        if leftover_visible:
+            content_parts.append(leftover_visible)
+            await on_delta(leftover_visible)
         if not terminal_received:
             raise RuntimeError("The model stream ended before the response was complete.")
-        return "".join(parts), usage, str(finish_reason), actual_model
+        return (
+            "".join(content_parts),
+            "".join(thinking_parts),
+            usage,
+            str(finish_reason),
+            actual_model,
+        )
 
     @staticmethod
     def _parse_response(raw: dict[str, Any], provider: str, model: str) -> InferenceResponse:
         """Normalise the OpenAI-compatible JSON response into InferenceResponse."""
         choices: list[dict[str, Any]] = raw.get("choices", [])
         content = ""
+        thinking = ""
         finish_reason = "stop"
         if choices:
             first = choices[0]
             msg = first.get("message", {})
-            content = msg.get("content", "")
+            if not isinstance(msg, dict):
+                msg = {}
+            content = msg.get("content", "") or ""
+            thinking = _reasoning_text(msg)
+            visible, tagged = _ThinkTagParser.split_complete(content)
+            content = visible
+            thinking = f"{thinking}{tagged}"
             finish_reason = first.get("finish_reason", "stop") or "stop"
 
         usage: dict[str, Any] = raw.get("usage", {})
@@ -538,5 +636,73 @@ class Router:
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),
             finish_reason=finish_reason,
+            thinking=thinking,
             raw=raw,
         )
+
+
+def _reasoning_text(payload: dict[str, Any]) -> str:
+    for key in ("reasoning", "reasoning_content", "thinking", "thoughts"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+class _ThinkTagParser:
+    """Split streamed ``<think>`` blocks from user-visible content."""
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._in_think = False
+
+    def feed(self, piece: str) -> tuple[str, str]:
+        if not piece:
+            return "", ""
+        self._buffer += piece
+        content: list[str] = []
+        thinking: list[str] = []
+        while self._buffer:
+            needle = self._CLOSE if self._in_think else self._OPEN
+            index = self._buffer.lower().find(needle)
+            if index == -1:
+                keep = _partial_tag_suffix(self._buffer, needle)
+                emit = self._buffer[:-keep] if keep else self._buffer
+                self._buffer = self._buffer[-keep:] if keep else ""
+                if emit:
+                    (thinking if self._in_think else content).append(emit)
+                break
+            before = self._buffer[:index]
+            if before:
+                (thinking if self._in_think else content).append(before)
+            self._buffer = self._buffer[index + len(needle):]
+            self._in_think = not self._in_think
+        return "".join(content), "".join(thinking)
+
+    def flush(self) -> tuple[str, str]:
+        leftover = self._buffer
+        self._buffer = ""
+        if not leftover:
+            return "", ""
+        if self._in_think:
+            return "", leftover
+        return leftover, ""
+
+    @classmethod
+    def split_complete(cls, text: str) -> tuple[str, str]:
+        parser = cls()
+        visible, thinking = parser.feed(text)
+        leftover_visible, leftover_think = parser.flush()
+        return visible + leftover_visible, thinking + leftover_think
+
+
+def _partial_tag_suffix(buffer: str, tag: str) -> int:
+    lowered = buffer.lower()
+    max_keep = min(len(buffer), len(tag) - 1)
+    for size in range(max_keep, 0, -1):
+        if tag.startswith(lowered[-size:]):
+            return size
+    return 0

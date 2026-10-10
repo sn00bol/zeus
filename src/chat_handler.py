@@ -72,7 +72,10 @@ class ChatHandler:
                     publish("delta", {"text": pending_text[:_DELTA_CHUNK_CHARS]})
                     pending_text = pending_text[_DELTA_CHUNK_CHARS:]
 
-            result = await self._model_loop.respond(request, on_delta)
+            async def on_thinking(text: str) -> None:
+                publish("thinking", {"text": text})
+
+            result = await self._model_loop.respond(request, on_delta, on_thinking)
             if pending_text:
                 publish("delta", {"text": pending_text})
             saved_message = assistant_message(

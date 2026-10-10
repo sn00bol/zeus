@@ -5,7 +5,7 @@ Subpackages
 -----------
 core       Shared database, model, and conversation session services
 provider   LLM backend adapters (Ollama, LM Studio, LlamaCPP)
-skills     Bot personality and behaviour definitions
+skills     Identity (SOUL), safety, and automatic task skills
 
 Scripts
 -------

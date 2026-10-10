@@ -27,13 +27,18 @@ class ModelLoop:
         self,
         request: InferenceRequest,
         on_delta: Callable[[str], Awaitable[None]],
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
     ) -> InferenceResponse:
         if self._closing:
             raise RuntimeError("The model loop is shutting down.")
         async with self._slots:
             if self._closing:
                 raise RuntimeError("The model loop is shutting down.")
-            return await self._router.route_stream(request, on_delta)
+            return await self._router.route_stream(
+                request,
+                on_delta,
+                on_thinking=on_thinking,
+            )
 
     def close(self) -> None:
         self._closing = True

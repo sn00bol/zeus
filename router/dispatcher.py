@@ -28,7 +28,21 @@ _CODE_PATTERNS = [
 _REASONING_PATTERNS = [
     re.compile(r"\b(step[-\s]?by[-\s]?step|think|reasoning|explain\s+why|analyze|compare|evaluate|proof|derive)\b", re.IGNORECASE),
     re.compile(r"\b(architecture|trade-offs|pros\s+and\s+cons|thoroughly|detailed\s+plan)\b", re.IGNORECASE),
+    re.compile(r"\b(suy\s+nghĩ|tại\s+sao|giải\s+thích|phân\s+tích|chứng\s+minh|tính\s+toán|so\s+sánh|kế\s+hoạch|lập\s+luận|hãy\s+nghĩ|bước\s+bước)\b", re.IGNORECASE),
 ]
+
+_REASONING_MODEL_PATTERNS = re.compile(
+    r"\b(r1|qwq|reasoning|thinking|deepseek-r1|deepseek-reasoner)\b|-(?:r1|qwq)\b",
+    re.IGNORECASE,
+)
+
+
+def is_reasoning_model(model_name: str | None) -> bool:
+    """Return True if the model name indicates a reasoning-focused model."""
+    if not model_name:
+        return False
+    return bool(_REASONING_MODEL_PATTERNS.search(model_name))
+
 
 
 @dataclass(frozen=True)
@@ -94,6 +108,14 @@ def analyze_task_complexity(messages: list[Any]) -> TaskComplexity:
         reasoning_heavy=reasoning_heavy,
         reasons=reasons,
     )
+
+
+def should_enable_thinking(complexity: TaskComplexity, model_name: str | None = None) -> bool:
+    """Enable local-model thinking for medium and heavy prompts or reasoning models."""
+    if is_reasoning_model(model_name):
+        return True
+    return complexity.level in {"moderate", "complex"} or complexity.reasoning_heavy
+
 
 
 class DynamicDispatcher:

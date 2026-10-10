@@ -40,7 +40,7 @@ export async function loadSessionHistory({
         messagesElement.replaceChildren();
         for (const message of messages) {
             if (message.role !== 'user' && message.role !== 'assistant') continue;
-            const rendered = addMessage(message.role, message.content);
+            const rendered = addMessage(message.role, message.content, { thinking: message.thinking });
             if (message.role === 'assistant' && message.usage) {
                 renderStreamDetails(rendered.details, {
                     prompt_tokens: Number(message.usage.prompt_tokens),

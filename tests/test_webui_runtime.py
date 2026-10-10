@@ -151,7 +151,8 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
 
             async def aiter_lines(self) -> object:
                 for line in (
-                    'data: {"model":"actual-model","choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}',
+                    'data: {"model":"actual-model","choices":[{"delta":{"reasoning":"plan","content":""},"finish_reason":null}]}',
+                    'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}',
                     'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":1}}',
                     "data: [DONE]",
                 ):
@@ -180,6 +181,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
 
         router._get_client = get_client
         deltas: list[str] = []
+        thoughts: list[str] = []
         result = await router.route_stream(
             SimpleNamespace(
                 messages=[],
@@ -188,21 +190,163 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 stream=True,
                 temperature=None,
                 max_tokens=None,
-                personality=None,
                 platform="webui",
                 extra={},
                 session=None,
             ),
             lambda text: _append_delta(deltas, text),
+            on_thinking=lambda text: _append_delta(thoughts, text),
         )
 
         self.assertEqual(deltas, ["Hi"])
+        self.assertEqual(thoughts, ["plan"])
         self.assertEqual(result.content, "Hi")
+        self.assertEqual(result.thinking, "plan")
         self.assertEqual(result.model, "actual-model")
         self.assertEqual(result.prompt_tokens, 4)
         self.assertEqual(result.completion_tokens, 1)
         self.assertEqual(client.call[0], "POST")
         self.assertEqual(client.call[1], "http://model/v1/chat/completions")
+        self.assertFalse(client.call[2]["json"]["think"])
+
+    async def test_router_enables_thinking_and_strips_think_tags_for_heavy_prompts(self) -> None:
+        from core.model import ModelContext
+
+        class FakeProvider:
+            name = "ollama"
+            endpoint = SimpleNamespace(base_url="http://model")
+
+        class FakeModelManager:
+            async def resolve(self, request: object) -> ModelContext:
+                return ModelContext(
+                    provider_name="ollama",
+                    provider=FakeProvider(),
+                    model_name="test-model",
+                    messages=[{"role": "user", "content": "analyze this"}],
+                )
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            async def aiter_lines(self) -> object:
+                for line in (
+                    'data: {"choices":[{"delta":{"content":"<think>check"},"finish_reason":null}]}',
+                    'data: {"choices":[{"delta":{"content":"</think>Answer"},"finish_reason":null}]}',
+                    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+                    "data: [DONE]",
+                ):
+                    yield line
+
+        class StreamContext:
+            async def __aenter__(self) -> FakeResponse:
+                return FakeResponse()
+
+            async def __aexit__(self, *args: object) -> None:
+                return None
+
+        class FakeClient:
+            def __init__(self) -> None:
+                self.call: tuple[object, ...] | None = None
+
+            def stream(self, *args: object, **kwargs: object) -> StreamContext:
+                self.call = (*args, kwargs)
+                return StreamContext()
+
+        router = Router(model_manager=FakeModelManager())
+        client = FakeClient()
+        router._get_client = lambda: _async_value(client)
+        deltas: list[str] = []
+        thoughts: list[str] = []
+        result = await router.route_stream(
+            SimpleNamespace(
+                messages=[SimpleNamespace(role="user", content="Analyze and compare these designs step by step.")],
+                model=None,
+                provider_name=None,
+                stream=True,
+                temperature=None,
+                max_tokens=None,
+                platform="webui",
+                extra={},
+                session=None,
+            ),
+            lambda text: _append_delta(deltas, text),
+            on_thinking=lambda text: _append_delta(thoughts, text),
+        )
+
+        self.assertEqual(deltas, ["Answer"])
+        self.assertEqual(thoughts, ["check"])
+        self.assertEqual(result.content, "Answer")
+        self.assertEqual(result.thinking, "check")
+        self.assertTrue(client.call[2]["json"]["think"])
+
+    async def test_router_respects_explicit_think_flag(self) -> None:
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                pass
+
+            async def aiter_lines(self):
+                yield 'data: {"choices":[{"delta":{"content":"Hi"}}]}'
+                yield "data: [DONE]"
+
+        class StreamContext:
+            async def __aenter__(self):
+                return FakeResponse()
+
+            async def __aexit__(self, *args):
+                return None
+
+        class FakeClient:
+            def __init__(self):
+                self.call = None
+
+            def stream(self, *args, **kwargs):
+                self.call = (*args, kwargs)
+                return StreamContext()
+
+        class FakeProvider:
+            name = "ollama"
+            endpoint = SimpleNamespace(base_url="http://127.0.0.1:11434")
+
+        class FakeModelManager:
+            async def resolve(self, request):
+                return SimpleNamespace(
+                    provider=FakeProvider(),
+                    model_name="deepseek-r1",
+                    provider_name="ollama",
+                    messages=[{"role": "user", "content": "hi"}],
+                    temperature=0.7,
+                    max_tokens=None,
+                    api_token=None,
+                    session=None,
+                )
+
+        router = Router(model_manager=FakeModelManager())
+        client = FakeClient()
+        router._get_client = lambda: _async_value(client)
+        deltas = []
+
+        await router.route_stream(
+            SimpleNamespace(
+                messages=[SimpleNamespace(role="user", content="hi")],
+                model="deepseek-r1",
+                provider_name="ollama",
+                stream=True,
+                temperature=None,
+                max_tokens=None,
+                platform="webui",
+                extra={"think": True},
+                session=None,
+            ),
+            lambda text: _append_delta(deltas, text),
+        )
+
+        self.assertTrue(client.call[2]["json"]["think"])
+
+
+
+async def _async_value(value: object) -> object:
+    return value
 
 
 async def _append_delta(deltas: list[str], text: str) -> None:

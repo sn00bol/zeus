@@ -15,12 +15,11 @@
 </div>
 
 ## Features
-- Literrally a chatbot — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
-- Analysis documents — Support writing, spelling error checks, suggestion and basic Text Editor
-- Searching with searXNG - Support built in searXNG and Deep research, optimize result and speed
-- Compare - Using Discord Components V2 for more advance compare product, GPU,...
-- Smart database - Saving your history chat and your custom skill to make your personal AI Agents
-- Will add soon...
+- **Literrally a chatbot** — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
+- **Analysis documents** — Support writing, spelling error checks, suggestion and basic Text Editor
+- **Searching with searXNG** — Support built in searXNG and Deep research, optimize result and speed
+- **Compare** — Using Discord Components V2 for more advance compare product, GPU,...
+- **Smart database** — Saving your history chat and your custom skill to make your personal AI Agents
 
 ## Quick start
 ```bash

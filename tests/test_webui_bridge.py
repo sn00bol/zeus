@@ -67,6 +67,7 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
                 self.request = request
                 return type("Result", (), {
                     "content": "answer",
+                    "thinking": "",
                     "model": "local-model",
                     "provider": "ollama",
                     "prompt_tokens": 4,

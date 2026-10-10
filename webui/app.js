@@ -8,12 +8,11 @@ const ROOT = path.join(__dirname, '..');
 require('dotenv').config({ path: path.join(ROOT, '.env') });
 
 const database = require('../core/database');
-const { requestJson } = require('./bridge');
+const { requestJson, requestSse } = require('./bridge');
 const { StreamManager } = require('./streamManager');
 
 const PLATFORM = 'webui';
-const MAX_BODY_BYTES = 32 * 1024;
-const MAX_MESSAGE_LENGTH = 8_000;
+const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64 MB
 
 function modelScope(conversationId) {
     return `webui:conversation:${conversationId}`;
@@ -335,9 +334,6 @@ function createWebUiServer({
                     throw new HttpError(400, 'message must not be empty.');
                 }
                 const message = body.message.trim();
-                if (message.length > MAX_MESSAGE_LENGTH) {
-                    throw new HttpError(400, `message must be at most ${MAX_MESSAGE_LENGTH} characters.`);
-                }
 
                 const userId = `webui-${conversationId}`;
                 await db.appendMessage({
@@ -358,13 +354,15 @@ function createWebUiServer({
                 const preference = await db.getModelPreference(modelScope(conversationId));
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
-                    const result = await callBridge('/infer', {
+                    const result = await requestSse('/infer', {
                         method: 'POST',
-                        timeoutMs: 120_000,
+                        timeoutMs: 600_000,
                         body: {
+                            stream: true,
                             provider: preference?.provider,
                             model: preference?.model,
                             platform: PLATFORM,
+                            think: body.think,
                             session: {
                                 platform: PLATFORM,
                                 conversation_id: conversationId,
@@ -372,13 +370,21 @@ function createWebUiServer({
                             },
                             messages: history.map(({ role, content }) => ({ role, content })),
                         },
-                    }, conversationId);
+                        onEvent(type, data) {
+                            if (type === 'thinking' && data.text) {
+                                publish('thinking', { text: data.text });
+                            } else if (type === 'delta' && data.text) {
+                                publish('delta', { text: data.text });
+                            }
+                        },
+                    });
                     const assistantMessage = {
                         platform: PLATFORM,
                         conversation_id: conversationId,
                         message_id: randomUUID(),
                         role: 'assistant',
                         content: String(result.content || ''),
+                        thinking: String(result.thinking || ''),
                         provider: result.provider,
                         model: result.model,
                         user_id: userId,
@@ -389,11 +395,6 @@ function createWebUiServer({
                         timestamp: new Date().toISOString(),
                     };
                     await db.appendMessage(assistantMessage);
-
-                    const chunkSize = 48;
-                    for (let offset = 0; offset < assistantMessage.content.length; offset += chunkSize) {
-                        publish('delta', { text: assistantMessage.content.slice(offset, offset + chunkSize) });
-                    }
                     publish('streamaddon', {
                         provider: result.provider,
                         model: result.model,

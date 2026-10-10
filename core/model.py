@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 
 from src.provider import BaseProvider, ModelInfo, get_provider
-from src.skills.personality import Personality, get_personality
+from src.skills.conversation import ConversationComposer, DEFAULT_TEMPERATURE
+from src.skills.runtime import SkillRuntime
 
 from .memory import MemoryStore
 from .session import Session
@@ -27,7 +28,6 @@ class _InferenceRequestLike(Protocol):
     provider_name: str | None
     model: str | None
     messages: list[_MessageLike]
-    personality: Personality | None
     temperature: float | None
     max_tokens: int | None
     session: Session | None
@@ -56,12 +56,15 @@ class ModelManager:
         cache_ttl_seconds: float = 30.0,
         provider_factory: Callable[[str], BaseProvider] = get_provider,
         memory_store: MemoryStore | None = None,
+        skill_runtime: SkillRuntime | None = None,
     ) -> None:
         if cache_ttl_seconds <= 0:
             raise ValueError("Model cache TTL must be greater than zero.")
         self._cache_ttl_seconds = cache_ttl_seconds
         self._provider_factory = provider_factory
         self._memory_store = memory_store
+        self._skill_runtime = skill_runtime or SkillRuntime()
+        self._conversation = ConversationComposer(self._skill_runtime.core)
         self._providers: dict[str, BaseProvider] = {}
         self._model_cache: dict[str, tuple[float, list[ModelInfo]]] = {}
         self._model_info_cache: dict[tuple[str, str], tuple[float, ModelInfo | None]] = {}
@@ -222,17 +225,17 @@ class ModelManager:
             selected_model.limits.context_length if selected_model else None
         )
 
-        personality = request.personality or get_personality()
         built_messages = [
             {"role": message.role, "content": message.content}
             for message in request.messages
         ]
         memory_context: list[str] = []
         session = request.session
-        latest_question = next(
-            (message.content for message in reversed(request.messages) if message.role == "user"),
-            "",
-        )
+        user_texts = [
+            message.content for message in request.messages if message.role == "user"
+        ]
+        latest_question = user_texts[-1] if user_texts else ""
+        recent_user = "\n".join(user_texts[-4:-1]) if len(user_texts) > 1 else ""
         if (
             self._memory_store is not None
             and session is not None
@@ -245,7 +248,8 @@ class ModelManager:
                 query=latest_question,
             )
         if not any(message["role"] == "system" for message in built_messages):
-            built_messages.insert(0, personality.build_system_message())
+            selected = self._skill_runtime.select(latest_question, recent=recent_user)
+            built_messages.insert(0, self._conversation.build_system_message(selected))
         if memory_context:
             memory_message = {
                 "role": "system",
@@ -273,7 +277,7 @@ class ModelManager:
             temperature=(
                 requested_temperature
                 if requested_temperature is not None
-                else personality.temperature
+                else DEFAULT_TEMPERATURE
             ),
             max_tokens=request.max_tokens,
             session=request.session,

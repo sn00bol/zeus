@@ -6,11 +6,13 @@ function parseEvent(event) {
     }
 }
 
-export async function startChatStream({ conversationId, message }) {
+export async function startChatStream({ conversationId, message, think }) {
+    const payload = { conversationId, message };
+    if (think !== undefined) payload.think = think;
     const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId, message }),
+        body: JSON.stringify(payload),
     });
     const start = await response.json();
     if (!response.ok) throw new Error(start.error || `Chat request failed (${response.status}).`);
@@ -39,6 +41,7 @@ export function watchChatStream({ streamId, onEvent }) {
         };
 
         listen('ui_control', data => onEvent('ui_control', data));
+        listen('thinking', data => onEvent('thinking', data));
         listen('delta', data => onEvent('delta', data));
         listen('streamaddon', data => onEvent('streamaddon', data));
         listen('done', data => {
