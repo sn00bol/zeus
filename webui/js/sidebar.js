@@ -6,6 +6,17 @@ export function initializeSidebar({ api, sessionId }) {
     const deleteDialog = document.getElementById('delete-dialog');
     const deleteTitle = document.getElementById('delete-chat-title');
 
+    // Search modal elements
+    const searchOverlay = document.getElementById('search-overlay');
+    const searchInput = document.getElementById('search-modal-input');
+    const searchResults = document.getElementById('search-results');
+    const searchCloseBtn = document.getElementById('search-modal-close');
+
+    /** All loaded conversations (cache for search) */
+    let allConversations = [];
+
+    // ─── Conversation CRUD helpers ────────────────────────────────────────────
+
     async function updateConversation(id, action, extra = {}) {
         return api(`/api/conversations/${encodeURIComponent(id)}`, {
             method: 'POST',
@@ -18,7 +29,7 @@ export function initializeSidebar({ api, sessionId }) {
     }
 
     function confirmDelete(title) {
-        deleteTitle.textContent = `“${title}”`;
+        deleteTitle.textContent = `"${title}"`;
         return new Promise(resolve => {
             deleteDialog.addEventListener('close', () => {
                 resolve(deleteDialog.returnValue === 'delete');
@@ -26,6 +37,8 @@ export function initializeSidebar({ api, sessionId }) {
             deleteDialog.showModal();
         });
     }
+
+    // ─── Rename inline form ───────────────────────────────────────────────────
 
     function beginRename(conversation, row, item) {
         const form = document.createElement('form');
@@ -72,7 +85,6 @@ export function initializeSidebar({ api, sessionId }) {
                 input.focus();
                 return;
             }
-
             input.disabled = true;
             try {
                 await updateConversation(conversation.conversation_id, 'rename', { title });
@@ -86,9 +98,12 @@ export function initializeSidebar({ api, sessionId }) {
         });
     }
 
+    // ─── Load & render conversation list ──────────────────────────────────────
+
     async function loadConversations() {
         const { conversations } = await api('/api/conversations?archived=all');
-        document.querySelectorAll('.conversation-menu').forEach(element => element.remove());
+        allConversations = conversations; // cache for search
+        document.querySelectorAll('.conversation-menu').forEach(el => el.remove());
         list.replaceChildren();
         if (conversations.length === 0) {
             const empty = document.createElement('div');
@@ -114,6 +129,7 @@ export function initializeSidebar({ api, sessionId }) {
 
             const actions = document.createElement('div');
             actions.className = 'conversation-actions';
+
             const pin = document.createElement('button');
             pin.type = 'button';
             pin.className = 'conversation-action';
@@ -137,8 +153,8 @@ export function initializeSidebar({ api, sessionId }) {
                         { value: !conversation.metadata?.pinned },
                     );
                     await loadConversations();
-                } catch (error) {
-                    showConversationError(error);
+                } catch (err) {
+                    showConversationError(err);
                 }
             });
 
@@ -155,15 +171,17 @@ export function initializeSidebar({ api, sessionId }) {
             more.title = 'Options';
             more.setAttribute('aria-label', 'Conversation options');
             more.setAttribute('aria-expanded', 'false');
+
             const menu = document.createElement('div');
             menu.className = 'conversation-menu';
             menu.hidden = true;
+
             more.addEventListener('click', event => {
                 event.stopPropagation();
                 const opening = menu.hidden;
-                document.querySelectorAll('.conversation-menu').forEach(element => { element.hidden = true; });
-                document.querySelectorAll('.conversation-action[aria-expanded]').forEach(element => {
-                    element.setAttribute('aria-expanded', 'false');
+                document.querySelectorAll('.conversation-menu').forEach(el => { el.hidden = true; });
+                document.querySelectorAll('.conversation-action[aria-expanded]').forEach(el => {
+                    el.setAttribute('aria-expanded', 'false');
                 });
                 if (opening) {
                     menu.hidden = false;
@@ -179,8 +197,9 @@ export function initializeSidebar({ api, sessionId }) {
                     menu.style.left = `${left}px`;
                     menu.style.top = `${top}px`;
                     menu.hidden = false;
+                } else {
+                    menu.hidden = true;
                 }
-                if (!opening) menu.hidden = true;
                 more.setAttribute('aria-expanded', String(opening));
             });
 
@@ -207,8 +226,8 @@ export function initializeSidebar({ api, sessionId }) {
                             await updateConversation(conversation.conversation_id, action, extra);
                         }
                         await loadConversations();
-                    } catch (error) {
-                        showConversationError(error);
+                    } catch (err) {
+                        showConversationError(err);
                     }
                 });
                 menu.append(button);
@@ -228,6 +247,92 @@ export function initializeSidebar({ api, sessionId }) {
         }
     }
 
+    // ─── Search modal ─────────────────────────────────────────────────────────
+
+    function escapeHtml(str) {
+        return str.replace(/[&<>"']/g, c => (
+            { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+        ));
+    }
+
+    function highlightMatch(text, query) {
+        if (!query) return escapeHtml(text);
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`(${escaped})`, 'gi');
+        return escapeHtml(text).replace(re, '<mark>$1</mark>');
+    }
+
+    function renderSearchResults(query) {
+        const q = query.trim().toLowerCase();
+        const filtered = q
+            ? allConversations.filter(c => c.preview.toLowerCase().includes(q))
+            : allConversations;
+
+        searchResults.replaceChildren();
+
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'search-result-empty';
+            empty.textContent = q ? `No conversations matching "${query}"` : 'No conversations yet';
+            searchResults.append(empty);
+            return;
+        }
+
+        for (const conv of filtered) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'search-result-item';
+
+            const iconEl = document.createElement('div');
+            iconEl.className = 'search-result-icon';
+            iconEl.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
+
+            const label = document.createElement('span');
+            label.innerHTML = highlightMatch(conv.preview, query);
+            label.style.cssText = 'min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+
+            btn.append(iconEl, label);
+            btn.addEventListener('click', () => {
+                closeSearch();
+                selectSession(conv.conversation_id);
+            });
+            searchResults.append(btn);
+        }
+    }
+
+    function openSearch() {
+        const modal = document.getElementById('search-modal');
+        // Reset animation so it replays on each open
+        modal.style.animation = 'none';
+        searchOverlay.hidden = false;
+        requestAnimationFrame(() => { modal.style.animation = ''; });
+        searchInput.value = '';
+        renderSearchResults('');
+        searchInput.focus();
+    }
+
+    function closeSearch() {
+        searchOverlay.hidden = true;
+    }
+
+    // Live filter as user types
+    searchInput.addEventListener('input', () => renderSearchResults(searchInput.value));
+
+    // Escape key closes modal
+    searchInput.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
+    });
+
+    // Close button
+    searchCloseBtn.addEventListener('click', closeSearch);
+
+    // Click outside modal card closes it
+    searchOverlay.addEventListener('click', event => {
+        if (event.target === searchOverlay) closeSearch();
+    });
+
+    // ─── Sidebar open/close toggle ────────────────────────────────────────────
+
     function setMenuOpen(open) {
         appElement.classList.toggle('menu-closed', !open);
         const toggle = document.getElementById('menu-toggle');
@@ -235,7 +340,14 @@ export function initializeSidebar({ api, sessionId }) {
         toggle.setAttribute('aria-label', open ? 'Collapse menu' : 'Expand menu');
     }
 
+    // Open sidebar wiring
     document.getElementById('new-chat').addEventListener('click', startNewSession);
+    document.getElementById('sidebar-search-btn').addEventListener('click', openSearch);
+
+    // Collapsed sidebar icon wiring
+    document.getElementById('collapsed-new-chat').addEventListener('click', startNewSession);
+    document.getElementById('collapsed-search').addEventListener('click', openSearch);
+
     document.getElementById('menu-toggle').addEventListener('click', () => {
         setMenuOpen(appElement.classList.contains('menu-closed'));
     });
@@ -249,9 +361,9 @@ export function initializeSidebar({ api, sessionId }) {
 
     document.addEventListener('click', event => {
         if (event.target.closest('.conversation-row, .conversation-menu')) return;
-        document.querySelectorAll('.conversation-menu').forEach(element => { element.hidden = true; });
-        document.querySelectorAll('.conversation-action[aria-expanded]').forEach(element => {
-            element.setAttribute('aria-expanded', 'false');
+        document.querySelectorAll('.conversation-menu').forEach(el => { el.hidden = true; });
+        document.querySelectorAll('.conversation-action[aria-expanded]').forEach(el => {
+            el.setAttribute('aria-expanded', 'false');
         });
     });
 

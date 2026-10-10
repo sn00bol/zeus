@@ -206,6 +206,41 @@ const themeStyles = String.raw`
         .menu-toggle:hover .sidebar-icon, .new-chat:hover .newchat-icon { filter: invert(1); }
         .conversation-action .action-icon { opacity: 0.6; }
         .conversation-action:hover .action-icon, .conversation-action.pinned .action-icon { opacity: 1; filter: invert(1); }
+
+        /* Collapsed sidebar quick-action icons */
+        .sidebar-collapsed-icons { position: absolute; top: 74px; left: 0; width: 56px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; opacity: 0; pointer-events: none; transition: opacity .14s ease .06s; z-index: 21; }
+        .app.menu-closed .sidebar-collapsed-icons { opacity: 1; pointer-events: auto; transition: opacity .18s ease .12s; }
+        .collapsed-icon-btn { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 9px; color: #9aa3b5; background: transparent; cursor: pointer; transition: background .15s, border-color .15s; }
+        .collapsed-icon-btn:hover { background: #ffffff0d; border-color: var(--line); color: #fff; }
+        .collapsed-icon-img { display: block; object-fit: contain; filter: invert(0.75); transition: filter .15s; }
+        .collapsed-icon-btn:hover .collapsed-icon-img { filter: invert(1); }
+
+        /* Sidebar search button (open sidebar) */
+        .sidebar-search-btn { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; color: #cbd5e1; background: transparent; padding: 6px 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
+        .sidebar-search-btn:hover { background: #ffffff0c; color: #fff; }
+        .search-btn-icon { display: block; object-fit: contain; filter: invert(0.85); transition: filter .15s; flex: none; }
+        .sidebar-search-btn:hover .search-btn-icon { filter: invert(1); }
+        .search-modal-icon { display: block; object-fit: contain; filter: invert(0.6); flex: none; }
+
+        /* Search modal overlay */
+        .search-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding-top: clamp(60px, 12vh, 130px); background: rgba(5, 7, 14, 0.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+        .search-overlay[hidden] { display: none; }
+        .search-modal { width: min(560px, calc(100vw - 32px)); border: 1px solid #ffffff1a; border-radius: 14px; background: #131822; animation: searchIn .18s ease-out forwards; overflow: hidden; box-shadow: 0 24px 64px #00000088, 0 0 0 1px #ffffff08; }
+        @keyframes searchIn { from { opacity: 0; transform: translateY(-10px) scale(.97); } to { opacity: 1; transform: none; } }
+        .search-modal-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: #141922; border-bottom: 1px solid #ffffff0f; }
+        .search-modal-input { flex: 1; border: 0; outline: 0; background: transparent; color: #edf0f7; font: inherit; font-size: 14px; caret-color: #a78bfa; }
+        .search-modal-input::placeholder { color: #4e5769; }
+        .search-modal-input::-webkit-search-cancel-button { display: none; }
+        .search-modal-close { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #ffffff12; border-radius: 7px; color: #7a8499; background: transparent; cursor: pointer; flex: none; transition: background .15s, color .15s; }
+        .search-modal-close:hover { background: #ffffff0d; color: #e5e7eb; }
+        .search-results { max-height: min(380px, 55vh); overflow-y: auto; background: #101520; scrollbar-width: thin; scrollbar-color: #444b5a transparent; }
+        .search-result-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 11px 16px; border: 0; border-bottom: 1px solid #ffffff07; background: transparent; color: #c4cad5; text-align: left; font: inherit; font-size: 13px; cursor: pointer; transition: background .12s, color .12s; }
+        .search-result-item:last-child { border-bottom: 0; }
+        .search-result-item:hover { background: #ffffff0a; color: #edf0f7; }
+        .search-result-item mark { background: transparent; color: #c4b5fd; font-weight: 600; }
+        .search-result-empty { padding: 24px 16px; color: #4e5769; font-size: 13px; text-align: center; }
+        .search-result-icon { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 7px; background: #ffffff08; color: #818b9d; }
+
         .footer { width: min(100%, 920px); flex: none; margin-inline: auto; text-align: center; color: #687184; font-size: 10px; padding: 5px 0 0; }
         .chat-scroll::-webkit-scrollbar, .conversation-list::-webkit-scrollbar { width: 8px; }
         .chat-scroll::-webkit-scrollbar-track, .conversation-list::-webkit-scrollbar-track { background: transparent; }
