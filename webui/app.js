@@ -128,6 +128,14 @@ function createWebUiServer({
                 );
                 return;
             }
+            const iconMatch = url.pathname.match(/^\/icon\/([a-zA-Z0-9_-]+)\.png$/);
+            if (request.method === 'GET' && iconMatch) {
+                const iconPath = path.join(__dirname, 'icon', `${iconMatch[1]}.png`);
+                if (fs.existsSync(iconPath)) {
+                    sendStatic(response, iconPath, 'image/png');
+                    return;
+                }
+            }
             if (request.method === 'GET' && url.pathname === '/api/streams/active') {
                 const conversationId = validateConversationId(url.searchParams.get('conversationId'));
                 sendJson(response, 200, {

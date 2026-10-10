@@ -24,9 +24,9 @@ const themeStyles = String.raw`
         .app.menu-closed .sidebar { width: 56px; }
         .app.menu-closed .menubar-brand { opacity: 0; transform: translateX(-8px); pointer-events: none; }
         .app.menu-closed .menu-toggle { right: 11px; }
-        .app.menu-closed .sidebar-content { opacity: 0; transform: translateX(-12px); pointer-events: none; transition: opacity .12s ease, transform .22s ease; }
-        .new-chat { width: 100%; flex: none; display: flex; align-items: center; justify-content: center; gap: 9px; border: 1px solid #ffffff1a; border-radius: 11px; color: #e5e7eb; background: #ffffff08; padding: 11px; cursor: pointer; transition: background .18s, border-color .18s; }
-        .new-chat:hover { background: #ffffff10; border-color: #ffffff30; }
+        .app.menu-closed .sidebar-content { opacity: 0; transform: translateX(-12px); pointer-events: none; transition: opacity .1s ease, transform .22s ease; }
+        .new-chat { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; color: #cbd5e1; background: transparent; padding: 6px 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
+        .new-chat:hover { background: #ffffff0c; color: #fff; }
         .conversation-section { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
         .side-label { width: 100%; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border: 0; border-radius: 7px; color: #a3aaba; background: transparent; text-align: left; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
         .side-label:hover { color: #edf0f7; background: #ffffff08; }
@@ -142,7 +142,7 @@ const themeStyles = String.raw`
         /* Math */
         .math-block-container { display: flex; justify-content: center; margin: 14px 0; overflow-x: auto; }
         .math-block { display: inline-block; padding: 7px 16px; background: #0b0f17; border: 1px solid #a78bfa25; border-radius: 8px; font-family: "Cambria Math", "Latin Modern Math", serif; font-size: 1.15em; color: #e2e8f0; font-style: italic; letter-spacing: .02em; }
-        .math-inline { display: inline-block; padding: 1px 5px; background: #ffffff0a; border-radius: 4px; font-family: "Cambria Math", "Latin Modern Math", serif; font-size: 1em; color: #e2e8f0; font-style: italic; }
+        .math-inline { display: inline; font-family: "Cambria Math", "Latin Modern Math", serif; font-size: 1.05em; color: #e2e8f0; font-style: italic; }
 
         /* Horizontal rule & Strikethrough */
         .markdown-hr { border: 0; height: 1px; background: #ffffff14; margin: 18px 0; }
@@ -199,7 +199,13 @@ const themeStyles = String.raw`
         .send { width: 40px; height: 40px; display: grid; flex: none; place-items: center; border: 0; border-radius: 11px; padding: 0; color: #171321; background: #c4b5fd; cursor: pointer; transition: background .18s, transform .18s; }
         .send:hover:not(:disabled) { background: #d3c9ff; transform: translateY(-1px); }
         .send:disabled { opacity: .48; cursor: default; }
-        .send svg { display: block; }
+        .send svg, .send-icon { display: block; object-fit: contain; }
+        
+        /* Custom PNG icon styles */
+        .sidebar-icon, .newchat-icon, .action-icon { display: block; object-fit: contain; filter: invert(0.85); transition: filter .15s, opacity .15s; }
+        .menu-toggle:hover .sidebar-icon, .new-chat:hover .newchat-icon { filter: invert(1); }
+        .conversation-action .action-icon { opacity: 0.6; }
+        .conversation-action:hover .action-icon, .conversation-action.pinned .action-icon { opacity: 1; filter: invert(1); }
         .footer { width: min(100%, 920px); flex: none; margin-inline: auto; text-align: center; color: #687184; font-size: 10px; padding: 5px 0 0; }
         .chat-scroll::-webkit-scrollbar, .conversation-list::-webkit-scrollbar { width: 8px; }
         .chat-scroll::-webkit-scrollbar-track, .conversation-list::-webkit-scrollbar-track { background: transparent; }

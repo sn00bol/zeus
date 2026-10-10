@@ -148,12 +148,16 @@ function highlightCode(rawCode, language) {
 // ---------------------------------------------------------------------------
 
 const MATH_SYMBOLS = [
+    [/\\text\{([^}]+)\}/g, '$1'],
+    [/\\mathrm\{([^}]+)\}/g, '$1'],
+    [/\\mathbf\{([^}]+)\}/g, '$1'],
+    [/\\mathit\{([^}]+)\}/g, '$1'],
     [/\\times\b/g, '×'],
     [/\\div\b/g, '÷'],
     [/\\pm\b/g, '±'],
-    [/\\leq\b/g, '≤'],
-    [/\\geq\b/g, '≥'],
-    [/\\neq\b/g, '≠'],
+    [/\\leq\b|\\le\b/g, '≤'],
+    [/\\geq\b|\\ge\b/g, '≥'],
+    [/\\neq\b|\\ne\b/g, '≠'],
     [/\\approx\b/g, '≈'],
     [/\\infty\b/g, '∞'],
     [/\\alpha\b/g, 'α'],
@@ -167,12 +171,20 @@ const MATH_SYMBOLS = [
     [/\\sum\b/g, '∑'],
     [/\\int\b/g, '∫'],
     [/\\prod\b/g, '∏'],
-    [/\\rightarrow\b/g, '→'],
+    [/\\rightarrow\b|\\to\b/g, '→'],
     [/\\Rightarrow\b/g, '⇒'],
-    [/\\leftarrow\b/g, '←'],
+    [/\\leftarrow\b|\\gets\b/g, '←'],
     [/\\cdot\b/g, '·'],
     [/\\sqrt\{([^}]+)\}/g, '√($1)'],
     [/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)'],
+    [/-->/g, '→'],
+    [/->/g, '→'],
+    [/<--/g, '←'],
+    [/<-/g, '←'],
+    [/==>/g, '⇒'],
+    [/=>/g, '⇒'],
+    [/<==>/g, '⇔'],
+    [/<=>/g, '⇔'],
 ];
 
 function formatMathContent(mathText) {
@@ -181,6 +193,19 @@ function formatMathContent(mathText) {
         clean = clean.replace(pattern, replacement);
     }
     return clean;
+}
+
+function normalizeInlineText(text) {
+    if (!text) return '';
+    return text
+        .replace(/\\(?:text|mathrm|mathbf|mathit)\{([^}]+)\}/g, '$1')
+        .replace(/(^|[\s(])->([\s)]|$)/g, '$1→$2')
+        .replace(/(^|[\s(])-->([\s)]|$)/g, '$1→$2')
+        .replace(/(^|[\s(])<-([\s)]|$)/g, '$1←$2')
+        .replace(/(^|[\s(])<--([\s)]|$)/g, '$1←$2')
+        .replace(/(^|[\s(])=>([\s)]|$)/g, '$1⇒$2')
+        .replace(/(^|[\s(])==>([\s)]|$)/g, '$1⇒$2')
+        .replace(/(^|[\s(])<=>([\s)]|$)/g, '$1⇔$2');
 }
 
 // ---------------------------------------------------------------------------
@@ -271,7 +296,7 @@ function appendInlineTokens(parent, text) {
             }
         }
 
-        parent.append(document.createTextNode(part));
+        parent.append(document.createTextNode(normalizeInlineText(part)));
     }
 }
 

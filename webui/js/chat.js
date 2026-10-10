@@ -132,10 +132,7 @@ function setModelLabel() {
             .filter(Boolean).join(' · ');
         return;
     }
-    const runtime = runtimeModel
-        ? [runtimeModel.provider, runtimeModel.model].filter(Boolean).join(' · ')
-        : 'Automatic model';
-    modelLabel.textContent = `Automatic · ${runtime}`;
+    modelLabel.textContent = 'Automatic';
 }
 
 async function loadModels() {
@@ -160,9 +157,7 @@ function renderModelMenu() {
     autoName.textContent = 'Automatic';
     const autoProvider = document.createElement('span');
     autoProvider.className = 'model-option-provider';
-    autoProvider.textContent = runtimeModel
-        ? `Use default configuration · ${[runtimeModel.provider, runtimeModel.model].filter(Boolean).join(' · ')}`
-        : 'Use the default model configuration';
+    autoProvider.textContent = 'Use the default model configuration';
     autoCopy.append(autoName, autoProvider);
     automatic.append(autoCopy);
     automatic.addEventListener('click', () => chooseModel(null));
@@ -232,9 +227,25 @@ async function watchAssistantStream(streamId, response) {
     response.thinking.hidden = false;
     response.thinking.replaceChildren(loading.element);
 
+    let renderTimer = null;
+    const scheduleRender = () => {
+        if (renderTimer) return;
+        renderTimer = requestAnimationFrame(() => {
+            renderTimer = null;
+            setAssistantContent(response, renderedText);
+        });
+    };
+    const flushRender = (finalText) => {
+        if (renderTimer) {
+            cancelAnimationFrame(renderTimer);
+            renderTimer = null;
+        }
+        if (typeof finalText === 'string') renderedText = finalText;
+        setAssistantContent(response, renderedText);
+    };
+
     try {
         const result = await watchChatStream({
-            streamId,
             onEvent(type, data) {
                 if (type === 'ui_control') {
                     if (data.state === 'thinking') loading.setLabel('Thinking…');
@@ -245,22 +256,23 @@ async function watchAssistantStream(streamId, response) {
                 } else if (type === 'delta') {
                     loading.finish();
                     renderedText += data.text;
-                    setAssistantContent(response, renderedText);
+                    scheduleRender();
                 } else if (type === 'streamaddon') {
                     renderStreamDetails(response.details, data);
                 } else if (type === 'done') {
                     if (data.message?.thinking) loading.setThinking(data.message.thinking);
                     loading.finish();
-                    renderedText = data.message.content;
-                    setAssistantContent(response, renderedText);
+                    flushRender(data.message.content);
                 }
             },
+            streamId,
         });
         if (result.message?.thinking) loading.setThinking(result.message.thinking);
         loading.finish();
+        flushRender(result.message?.content || renderedText);
         if (!loading.element.isConnected) response.thinking.hidden = true;
-        if (!renderedText) setAssistantContent(response, result.message.content);
     } catch (error) {
+        if (renderTimer) cancelAnimationFrame(renderTimer);
         loading.remove();
         response.thinking.hidden = true;
         response.item.classList.add('error');
