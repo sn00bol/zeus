@@ -10,10 +10,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY requirements.txt package.json package-lock.json ./
-RUN python -m pip install --no-cache-dir -r requirements.txt \
-    && npm ci --omit=dev --no-audit --no-fund
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY . .
+RUN python -m pip install --no-cache-dir .
 
 CMD ["python", "app.py"]

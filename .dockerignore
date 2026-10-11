@@ -13,6 +13,7 @@ node_modules/
 __pycache__/
 *.py[codz]
 *$py.class
+build/
 database/*.db*
 database/postgres/
 database/history.json
@@ -22,3 +23,5 @@ tests/
 **/*.test.js
 **/*.test.cjs
 .backups/
+**/*.png~
+**/*.ico~

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeus-agent"
+dynamic = ["version"]
+description = "A self-hosting AI agent for WebUI, Discord, and Telegram."
+readme = "README.md"
+requires-python = ">=3.13"
+license = "GPL-3.0-only"
+authors = [{ name = "sn00bol" }]
+dependencies = [
+    "asyncpg",
+    "httpcore",
+    "httpx",
+    "python-dotenv",
+    "uvicorn",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[tool.setuptools.dynamic]
+version = { file = ["version"] }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "router*", "src*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100

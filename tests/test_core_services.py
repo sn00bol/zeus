@@ -123,6 +123,36 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.context_length, 65536)
         self.assertEqual(status["context_length"], 65536)
 
+    async def test_selected_model_uses_its_own_context_window(self) -> None:
+        class DifferentContextProvider(FakeProvider):
+            async def get_model(self, model_id: str) -> ModelInfo | None:
+                context_lengths = {"small-model": 8192, "large-model": 131072}
+                context_length = context_lengths.get(model_id)
+                if context_length is None:
+                    return None
+                return ModelInfo(
+                    id=model_id,
+                    limits=ModelLimits(context_length=context_length),
+                )
+
+        manager = ModelManager(provider_factory=lambda _: DifferentContextProvider())
+        contexts = []
+        for model_name in ("small-model", "large-model"):
+            request = SimpleNamespace(
+                provider_name="ollama",
+                model=model_name,
+                messages=[SimpleNamespace(role="user", content="hello")],
+                temperature=None,
+                max_tokens=None,
+                session=None,
+            )
+            contexts.append(await manager.resolve(request))
+
+        self.assertEqual(
+            [context.context_length for context in contexts],
+            [8192, 131072],
+        )
+
     async def test_bridge_status_reads_runtime_and_session_usage_from_core(self) -> None:
         now = datetime.now(timezone.utc)
         requested_session: dict[str, str] = {}
@@ -187,6 +217,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             patch.object(discord_bridge, "_router", FakeRouter()),
             patch.object(discord_bridge, "_agent_runner", FakeAgentRunner()),
             patch.object(discord_bridge, "_version", return_value="1.0.0.test"),
+            patch.object(discord_bridge, "_BRIDGE_TOKEN", "test-bridge-token"),
         ):
             await discord_bridge.BridgeApplication()._http(
                 {
@@ -194,6 +225,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
                     "method": "GET",
                     "path": "/status",
                     "query_string": b"platform=discord&conversation_id=thread-status",
+                    "headers": [(b"authorization", b"Bearer test-bridge-token")],
                 },
                 AsyncMock(),
                 send,
@@ -562,9 +594,14 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(discord_bridge, "_session_manager", FakeSessionManager()),
             patch.object(discord_bridge, "_agent_runner", FakeAgentRunner()),
+            patch.object(discord_bridge, "_BRIDGE_TOKEN", "test-bridge-token"),
         ):
             await discord_bridge.BridgeApplication()._http(
-                {"method": "POST", "path": "/agent/run"},
+                {
+                    "method": "POST",
+                    "path": "/agent/run",
+                    "headers": [(b"authorization", b"Bearer test-bridge-token")],
+                },
                 receive,
                 send,
             )

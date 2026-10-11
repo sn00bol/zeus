@@ -32,6 +32,7 @@ services:
       DB_PORT: "5432"
       WEBUI_HOST: "0.0.0.0"
       LLM_HOST: ${ZEUS_LLM_HOST:-host.docker.internal}
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:?Run python setup.py to generate BRIDGE_TOKEN}
       ENABLE_DOCKER_HEALTHCHECK: "true"
     depends_on:
       postgres:

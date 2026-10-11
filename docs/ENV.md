@@ -87,8 +87,17 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 | `BRIDGE_HOST` | Bind address for the Discord/Telegram platform inference bridge. |
 | `BRIDGE_PORT` | Port for the Discord/Telegram platform inference bridge; defaults to `5000`. |
 | `BRIDGE_URL` | Node bot URL for that platform bridge; defaults to `http://127.0.0.1:5000`. |
+| `BRIDGE_TOKEN` | Required private bearer token shared by the Node bot and Python platform bridge. `setup.py` generates it. |
 | `HEALTHCHECK_HOST` | Healthcheck bind/target host. Defaults to `127.0.0.1`. |
 | `HEALTHCHECK_PORT` | Bot health endpoint port when a bot is enabled; defaults to `3001` under the Python supervisor. |
+
+The platform bridge requires `Authorization: Bearer <BRIDGE_TOKEN>` for every
+endpoint except `/health`. This protects control, session, and inference APIs
+even when the bridge is accessed through a proxy or exposed beyond loopback.
+Use a long random token and keep it private. Requests larger than 16 MiB are
+rejected. This is service-level authorization: any holder of the shared token
+can access any platform session through the bridge; end-user ownership checks
+are enforced by the calling application, not by a per-user bridge identity.
 
 ## Compose image settings
 

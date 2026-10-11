@@ -48,6 +48,8 @@ Compose starts the WebUI and database together. You do not need to run
    - Leave `PLATFORM=webui` for WebUI-only. For a bot, use
      `PLATFORM=webui,discord` or `PLATFORM=webui,telegram` and fill in its token.
      Discord also requires `PFX`.
+   - Set `BRIDGE_TOKEN` to a long random value for the private Discord/Telegram
+     bridge. Running `python setup.py` generates and saves it automatically.
 
    To generate a random password with Python:
 
@@ -120,7 +122,7 @@ For development or a host-managed PostgreSQL server:
 
    ```bash
    npm ci
-   python -m pip install -r requirements.txt
+   python -m pip install .
    ```
 
 4. Start the application:

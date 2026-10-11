@@ -418,6 +418,7 @@ def setup_project(
             "DB_NAME": existing.get("DB_NAME", "zeus"),
             "DB_USER": existing.get("DB_USER", "zeus"),
             "DB_PASSWORD": existing.get("DB_PASSWORD") or secrets.token_urlsafe(32),
+            "BRIDGE_TOKEN": existing.get("BRIDGE_TOKEN") or secrets.token_urlsafe(32),
         }
         selected = set(platform.split(","))
         if (
@@ -487,6 +488,7 @@ def setup_project(
             "DB_NAME": existing.get("DB_NAME", "zeus"),
             "DB_USER": existing.get("DB_USER", "zeus"),
             "DB_PASSWORD": existing.get("DB_PASSWORD") or secrets.token_urlsafe(32),
+            "BRIDGE_TOKEN": existing.get("BRIDGE_TOKEN") or secrets.token_urlsafe(32),
         }
 
         # Platform specific settings
@@ -519,7 +521,7 @@ def setup_project(
     # Dependency Installation
     print_step("Installing Dependencies")
     run_with_spinner(npm_install_command(), cwd=root, desc="Installing Node.js dependencies")
-    run_with_spinner([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=root, desc="Installing Python packages")
+    run_with_spinner([sys.executable, "-m", "pip", "install", "."], cwd=root, desc="Installing Python packages")
     if "telegram" in platform.split(","):
         print_warning("Telegram support is currently in preview and testing")
 
@@ -550,4 +552,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if any(
+        argument in {"bdist_wheel", "build", "clean", "dist_info", "egg_info", "sdist"}
+        for argument in sys.argv[1:]
+    ):
+        from importlib import import_module
+
+        import_module("setuptools").setup()
+    else:
+        main()

@@ -23,7 +23,9 @@ export function renderStreamDetails(container, details) {
         );
     }
     if (Number.isFinite(details.context_length) && details.context_length > 0) {
-        usage.push(`Context: ${new Intl.NumberFormat().format(details.context_length)} tokens`);
+        usage.push(
+            `Model context window: ${new Intl.NumberFormat().format(details.context_length)} tokens`,
+        );
     }
     if (usage.length) {
         const usageLabel = document.createElement('span');

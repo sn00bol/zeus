@@ -30,6 +30,11 @@ from core.memory import MemoryStore
 from core.agent_store import AgentRunStore
 from core.session_manager import SessionManager
 from core.version import get_version
+from src.bridge_security import (
+    RequestBodyTooLarge,
+    is_authenticated,
+    read_json as _read_json,
+)
 from router.agent import AgentQueueFull, AgentRunner
 from router.router import InferenceRequest, InferenceResponse, Message, Router
 
@@ -42,6 +47,7 @@ log = logging.getLogger("discord_bridge")
 
 _BRIDGE_HOST = os.environ.get("BRIDGE_HOST", "127.0.0.1")
 _BRIDGE_PORT = int(os.environ.get("BRIDGE_PORT", "5000"))
+_BRIDGE_TOKEN = os.environ.get("BRIDGE_TOKEN", "").strip()
 _database = DatabaseRouter()
 _session_manager = SessionManager(_database)
 _memory_store = MemoryStore(_database)
@@ -127,24 +133,6 @@ def _inference_request(body: dict[str, Any]) -> InferenceRequest:
     )
 
 
-async def _read_json(receive: Any) -> dict[str, Any]:
-    chunks: list[bytes] = []
-    while True:
-        event = await receive()
-        if event["type"] == "http.disconnect":
-            raise ValueError("Request disconnected before its body was received")
-        chunks.append(event.get("body", b""))
-        if not event.get("more_body", False):
-            break
-    try:
-        body = json.loads(b"".join(chunks))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Invalid JSON body") from exc
-    if not isinstance(body, dict):
-        raise ValueError("JSON body must be an object")
-    return body
-
-
 async def _send_json(send: Any, data: Any, status: int = 200) -> None:
     body = _json_bytes(data)
     await send({
@@ -153,6 +141,7 @@ async def _send_json(send: Any, data: Any, status: int = 200) -> None:
         "headers": [
             (b"content-type", b"application/json; charset=utf-8"),
             (b"content-length", str(len(body)).encode("ascii")),
+            (b"cache-control", b"no-store"),
         ],
     })
     await send({"type": "http.response.body", "body": body})
@@ -187,6 +176,16 @@ class BridgeApplication:
         path = scope["path"]
         if method == "GET" and path == "/health":
             await _send_json(send, {"status": "ok"})
+            return
+        if not _BRIDGE_TOKEN:
+            await _send_json(
+                send,
+                {"error": "Bridge authentication is not configured"},
+                status=503,
+            )
+            return
+        if not is_authenticated(scope, _BRIDGE_TOKEN):
+            await _send_json(send, {"error": "Bearer token required"}, status=401)
             return
         if method == "GET" and path == "/providers":
             await _send_json(send, {"available": await _router.available_providers()})
@@ -260,6 +259,9 @@ class BridgeApplication:
         if method == "POST" and path == "/sessions/reset":
             try:
                 body = await _read_json(receive)
+            except RequestBodyTooLarge as exc:
+                await _send_json(send, {"error": str(exc)}, status=413)
+                return
             except ValueError as exc:
                 await _send_json(send, {"error": str(exc)}, status=400)
                 return
@@ -275,6 +277,9 @@ class BridgeApplication:
         if method == "POST" and path == "/control":
             try:
                 body = await _read_json(receive)
+            except RequestBodyTooLarge as exc:
+                await _send_json(send, {"error": str(exc)}, status=413)
+                return
             except ValueError as exc:
                 await _send_json(send, {"error": str(exc)}, status=400)
                 return
@@ -305,6 +310,9 @@ class BridgeApplication:
             try:
                 body = await _read_json(receive)
                 request = _inference_request(body)
+            except RequestBodyTooLarge as exc:
+                await _send_json(send, {"error": str(exc)}, status=413)
+                return
             except ValueError as exc:
                 await _send_json(send, {"error": str(exc)}, status=400)
                 return
