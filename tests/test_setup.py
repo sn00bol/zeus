@@ -36,25 +36,32 @@ class SetupSelectionTests(unittest.TestCase):
     def test_platform_selection_accepts_number(self) -> None:
         self.assertEqual(setup.choose_platform(lambda _: "2"), "webui,discord")
 
-    def test_webui_is_default_and_bot_platforms_are_mutually_exclusive(self) -> None:
+    def test_platform_selection_allows_both_bots(self) -> None:
         self.assertEqual(setup.choose_platform(lambda _: ""), "webui")
         self.assertEqual(setup.choose_platform(lambda _: "3"), "webui,telegram")
+        self.assertEqual(setup.choose_platform(lambda _: "4"), "webui,discord,telegram")
         self.assertEqual(
             setup._normalize_platform_selection("discord"),
             "webui,discord",
         )
-        with self.assertRaisesRegex(ValueError, "at most one"):
-            setup._normalize_platform_selection("webui,discord,telegram")
+        self.assertEqual(
+            setup._normalize_platform_selection("telegram,webui,discord,telegram"),
+            "webui,discord,telegram",
+        )
 
-    def test_interactive_platform_menu_toggles_optional_platform(self) -> None:
+    def test_interactive_platform_menu_can_toggle_both_bots(self) -> None:
         with (
             patch.object(setup.sys, "stdin", _TTYStringIO()),
             patch.object(setup.sys, "stdout", _TTYStringIO()),
-            patch.object(setup, "_read_menu_key", side_effect=["down", "space", "enter"]),
+            patch.object(
+                setup,
+                "_read_menu_key",
+                side_effect=["down", "space", "down", "space", "enter"],
+            ),
         ):
             selected = setup.choose_platform(current_platform="webui")
 
-        self.assertEqual(selected, "webui,telegram")
+        self.assertEqual(selected, "webui,discord,telegram")
 
     def test_model_selection_can_choose_automatic(self) -> None:
         with patch.object(setup, "discover_models", return_value=["gemma4:31b-cloud"]):

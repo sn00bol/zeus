@@ -106,7 +106,7 @@ def _wait_for_bridge(process: subprocess.Popen[str], port: int, timeout: float =
     raise RuntimeError(f"The inference bridge did not become ready at {health_url}.")
 
 
-def _poll_control(port: int) -> str | None:
+def _poll_control(port: int) -> tuple[str, str | None] | None:
     control_url = f"http://127.0.0.1:{port}/control/next"
     try:
         with urlopen(control_url, timeout=0.5) as response:
@@ -116,7 +116,10 @@ def _poll_control(port: int) -> str | None:
     except (OSError, URLError, json.JSONDecodeError):
         return None
     action = payload.get("action")
-    return action if action in {"restart", "stop"} else None
+    if action not in {"restart", "stop"}:
+        return None
+    platform = payload.get("platform")
+    return action, platform if platform in {"discord", "telegram"} else None
 
 
 def _wait_for_exit(process: subprocess.Popen[bytes] | None, timeout: float = 10) -> bool:
@@ -185,9 +188,7 @@ def _selected_platforms(value: str | None = None) -> tuple[str, ...]:
             f"Unsupported platform(s) {', '.join(sorted(unsupported))}. "
             "Choose WebUI and optionally Discord or Telegram."
         )
-    bot_platforms = [item for item in selected if item in {"discord", "telegram"}]
-    if len(bot_platforms) > 1:
-        raise RuntimeError("Select at most one additional platform: Discord or Telegram.")
+    bot_platforms = [item for item in ("discord", "telegram") if item in selected]
     return ("webui", *bot_platforms)
 
 
@@ -253,12 +254,32 @@ def run_platform(
     record_logs: bool = False,
     with_webui: bool = False,
 ) -> int:
-    token = os.environ.get(f"{name.upper()}_BOT_API_KEY" if name == "discord" else "TELEGRAM_BOT_API_KEY", "")
-    if not token or token == "YOUR_BOT_TOKEN":
-        raise RuntimeError(f"Set the API key in .env before starting {name}.")
-    
-    if name == "discord":
-        if not os.environ.get("PFX") or os.environ["PFX"] == "YOUR_BOT_PREFIX":
+    return run_platforms(
+        names=(name,),
+        record_logs=record_logs,
+        with_webui=with_webui,
+    )
+
+
+def run_platforms(
+    *,
+    names: tuple[str, ...],
+    record_logs: bool = False,
+    with_webui: bool = False,
+) -> int:
+    if not names or any(name not in {"discord", "telegram"} for name in names):
+        raise ValueError("At least one supported bot platform must be selected.")
+
+    for name in names:
+        token = os.environ.get(
+            f"{name.upper()}_BOT_API_KEY" if name == "discord" else "TELEGRAM_BOT_API_KEY",
+            "",
+        )
+        if not token or token == "YOUR_BOT_TOKEN":
+            raise RuntimeError(f"Set the API key in .env before starting {name}.")
+        if name == "discord" and (
+            not os.environ.get("PFX") or os.environ["PFX"] == "YOUR_BOT_PREFIX"
+        ):
             raise RuntimeError("Set PFX in .env before starting Discord.")
 
     node = shutil.which("node")
@@ -277,7 +298,9 @@ def run_platform(
 
     port = _configured_port("BRIDGE_PORT", 5000)
     bridge: subprocess.Popen[str] | None = None
-    bot: subprocess.Popen[str] | None = None
+    bots: dict[str, subprocess.Popen[str]] = {}
+    bot_commands: dict[str, list[str]] = {}
+    bot_options: dict[str, dict[str, object]] = {}
     webui_server: subprocess.Popen[str] | None = None
     recorder = _RunLogRecorder() if record_logs else None
     try:
@@ -312,64 +335,88 @@ def run_platform(
         if recorder:
             bridge_options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                   encoding="utf-8", errors="replace", bufsize=1)
-        # Both platform adapters use the shared inference bridge.
-        bridge = subprocess.Popen([sys.executable, "-m", f"src.{name}_bridge"], **bridge_options)
+        # One bridge serves all selected bots; platform requests carry their own platform.
+        bridge_platform = "discord" if "discord" in names else names[0]
+        bridge = subprocess.Popen(
+            [sys.executable, "-m", f"src.{bridge_platform}_bridge"],
+            **bridge_options,
+        )
         if recorder and bridge.stdout:
             recorder.attach("bridge", bridge.stdout, show_startup=True)
         _wait_for_bridge(bridge, port)
         if recorder:
             recorder.health_log_received.wait(timeout=1)
-        bot_environment = os.environ.copy()
-        bot_environment["ZEUS_SUPERVISED"] = "1"
-        bot_environment["PLATFORM"] = name
-        if with_webui:
-            webui_port = _webui_port()
-            healthcheck_port = _configured_port("HEALTHCHECK_PORT", 3001)
-            if healthcheck_port == webui_port:
-                raise RuntimeError("HEALTHCHECK_PORT must differ from WEBUI_PORT.")
-            bot_environment["HEALTHCHECK_PORT"] = str(healthcheck_port)
-        bot_command = [node, str(ROOT / "platform" / name / "index.js")]
-        bot_options: dict[str, object] = {"cwd": ROOT, "env": bot_environment}
-        if recorder:
-            bot_options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        webui_port = _webui_port() if with_webui else None
+        next_healthcheck_port = _configured_port("HEALTHCHECK_PORT", 3001)
+        used_healthcheck_ports = {webui_port} if webui_port is not None else set()
+        for name in names:
+            bot_environment = os.environ.copy()
+            bot_environment["ZEUS_SUPERVISED"] = "1"
+            bot_environment["PLATFORM"] = name
+            if with_webui:
+                while next_healthcheck_port in used_healthcheck_ports:
+                    next_healthcheck_port += 1
+                if next_healthcheck_port > 65535:
+                    raise RuntimeError("No available HEALTHCHECK_PORT remains for the selected bots.")
+                healthcheck_port = next_healthcheck_port
+                used_healthcheck_ports.add(healthcheck_port)
+                next_healthcheck_port += 1
+                bot_environment["HEALTHCHECK_PORT"] = str(healthcheck_port)
+            bot_command = [node, str(ROOT / "platform" / name / "index.js")]
+            options: dict[str, object] = {"cwd": ROOT, "env": bot_environment}
+            if recorder:
+                options.update(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                encoding="utf-8", errors="replace", bufsize=1)
-        bot = subprocess.Popen(bot_command, **bot_options)
-        if recorder and bot.stdout:
-            recorder.attach(name, bot.stdout)
+            bot_commands[name] = bot_command
+            bot_options[name] = options
+            bot = subprocess.Popen(bot_command, **options)
+            bots[name] = bot
+            if recorder and bot.stdout:
+                recorder.attach(name, bot.stdout)
         if with_webui:
             webui_server = _start_webui(node)
             print(f"ZEUS WebUI is available at http://localhost:{_webui_port()}.")
         if recorder:
-            recorder.record(f"ZEUS {name} platform is running.")
-        print(f"ZEUS {name} platform is running. Press Ctrl+C to stop.")
+            recorder.record(f"ZEUS {', '.join(names)} platform(s) are running.")
+        print(f"ZEUS {', '.join(names)} platform(s) are running. Press Ctrl+C to stop.")
         while True:
             if bridge.poll() is not None:
                 raise RuntimeError(f"The inference bridge exited (code {bridge.returncode}).")
             if webui_server and webui_server.poll() is not None:
                 raise RuntimeError(f"The WebUI server exited (code {webui_server.returncode}).")
-            action = _poll_control(port)
+            control = _poll_control(port)
+            action, target = control if control else (None, None)
             if action == "stop":
                 if recorder:
                     recorder.record("Received safe shutdown request.")
                 else:
                     print("Received safe shutdown request.")
-                if not _wait_for_exit(bot):
-                    _stop_process(bot)
+                target = target if target in bots else names[0]
+                for name, bot in bots.items():
+                    if name == target:
+                        if not _wait_for_exit(bot):
+                            _stop_process(bot)
+                    else:
+                        _stop_process(bot)
                 return 0
             if action == "restart":
+                target = target if target in bots else names[0]
                 if recorder:
-                    recorder.record(f"Received restart request; restarting the {name} bot.")
+                    recorder.record(f"Received restart request; restarting the {target} bot.")
                 else:
-                    print(f"Received restart request; restarting the {name} bot.")
+                    print(f"Received restart request; restarting the {target} bot.")
+                bot = bots[target]
                 if not _wait_for_exit(bot):
                     _stop_process(bot)
-                bot = subprocess.Popen(bot_command, **bot_options)
+                bot = subprocess.Popen(bot_commands[target], **bot_options[target])
+                bots[target] = bot
                 if recorder and bot.stdout:
-                    recorder.attach(name, bot.stdout)
+                    recorder.attach(target, bot.stdout)
                 continue
-            bot_code = bot.poll()
-            if bot_code is not None:
-                return bot_code
+            for name, bot in bots.items():
+                bot_code = bot.poll()
+                if bot_code is not None:
+                    return bot_code
             time.sleep(0.5)
     except KeyboardInterrupt:
         if recorder:
@@ -382,7 +429,8 @@ def run_platform(
             recorder.record(f"Startup or runtime failure: {exc}")
         raise
     finally:
-        _stop_process(bot)
+        for bot in bots.values():
+            _stop_process(bot)
         _stop_process(webui_server)
         _stop_process(bridge)
         if recorder:
@@ -400,11 +448,11 @@ def main() -> int:
     )
     args = parser.parse_args()
     platforms = _selected_platforms()
-    bot_platform = next((name for name in platforms if name != "webui"), None)
-    if bot_platform:
-        return run_platform(
-            name=bot_platform,
-            record_logs=args.logs if bot_platform == "discord" else False,
+    bot_platforms = tuple(name for name in platforms if name != "webui")
+    if bot_platforms:
+        return run_platforms(
+            names=bot_platforms,
+            record_logs=args.logs and "discord" in bot_platforms,
             with_webui=True,
         )
     return run_webui()

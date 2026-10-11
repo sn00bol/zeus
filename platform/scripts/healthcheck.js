@@ -35,11 +35,17 @@ function checkHealth() {
         .map(platform => platform.trim().toLowerCase())
         .filter(Boolean);
     if (!selected.includes('webui')) selected.unshift('webui');
+    const webuiPort = Number(process.env.WEBUI_PORT) || 3000;
     const checks = [
-        checkEndpoint(Number(process.env.WEBUI_PORT) || 3000),
+        checkEndpoint(webuiPort),
     ];
-    const bot = selected.find(platform => platform === 'discord' || platform === 'telegram');
-    if (bot) checks.push(checkEndpoint(Number(process.env.HEALTHCHECK_PORT) || 3001));
+    const bots = ['discord', 'telegram'].filter(platform => selected.includes(platform));
+    let healthcheckPort = Number(process.env.HEALTHCHECK_PORT) || 3001;
+    for (let index = 0; index < bots.length; index += 1) {
+        if (healthcheckPort === webuiPort) healthcheckPort += 1;
+        checks.push(checkEndpoint(healthcheckPort));
+        healthcheckPort += 1;
+    }
     return Promise.all(checks);
 }
 

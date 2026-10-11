@@ -11,7 +11,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'stop' },
+            body: { action: 'stop', platform: process.env.PLATFORM || 'telegram' },
         });
         await ctx.reply('Safe shutdown requested. The Telegram bot and AI bridge will stop.');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

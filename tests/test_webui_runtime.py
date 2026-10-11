@@ -129,6 +129,54 @@ class SupportingServicesTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
+    def test_gpt_oss_thinking_flag_uses_ollama_openai_reasoning_effort(self) -> None:
+        provider = SimpleNamespace(name="ollama")
+
+        disabled = Router._chat_payload(
+            provider,
+            "gpt-oss:120b",
+            [],
+            0.7,
+            None,
+            {"think": False},
+            stream=True,
+            think=False,
+        )
+        enabled = Router._chat_payload(
+            provider,
+            "gpt-oss:120b",
+            [],
+            0.7,
+            None,
+            {"think": True},
+            stream=True,
+            think=True,
+        )
+
+        self.assertEqual(disabled["reasoning_effort"], "none")
+        self.assertNotIn("think", disabled)
+        self.assertEqual(enabled["reasoning_effort"], "medium")
+        self.assertNotIn("think", enabled)
+
+    def test_explicit_think_off_disables_template_reasoning(self) -> None:
+        provider = SimpleNamespace(name="llamacpp")
+        payload = Router._chat_payload(
+            provider,
+            "gpt-oss-120b",
+            [],
+            0.7,
+            None,
+            {"think": False, "chat_template_kwargs": {"existing_option": True}},
+            stream=True,
+            think=False,
+        )
+
+        self.assertEqual(payload["chat_template_kwargs"], {
+            "existing_option": True,
+            "enable_thinking": False,
+        })
+        self.assertNotIn("think", payload)
+
     async def test_router_streams_deltas_and_collects_final_usage_without_buffering_chunks(self) -> None:
         from core.model import ModelContext
 
@@ -207,7 +255,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.completion_tokens, 1)
         self.assertEqual(client.call[0], "POST")
         self.assertEqual(client.call[1], "http://model/v1/chat/completions")
-        self.assertFalse(client.call[2]["json"]["think"])
+        self.assertEqual(client.call[2]["json"]["reasoning_effort"], "none")
 
     async def test_router_enables_thinking_and_strips_think_tags_for_heavy_prompts(self) -> None:
         from core.model import ModelContext
@@ -278,7 +326,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(thoughts, ["check"])
         self.assertEqual(result.content, "Answer")
         self.assertEqual(result.thinking, "check")
-        self.assertTrue(client.call[2]["json"]["think"])
+        self.assertEqual(client.call[2]["json"]["reasoning_effort"], "medium")
 
     async def test_router_respects_explicit_think_flag(self) -> None:
         class FakeResponse:
@@ -336,13 +384,13 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 temperature=None,
                 max_tokens=None,
                 platform="webui",
-                extra={"think": True},
+                extra={"think": False},
                 session=None,
             ),
             lambda text: _append_delta(deltas, text),
         )
 
-        self.assertTrue(client.call[2]["json"]["think"])
+        self.assertEqual(client.call[2]["json"]["reasoning_effort"], "none")
         self.assertEqual(response.context_length, 8192)
 
 

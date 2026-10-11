@@ -16,7 +16,7 @@ In particular, `DB_PASSWORD` must be set before Compose can start PostgreSQL.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PLATFORM` | `webui` | Enables the WebUI and optionally one bot: `webui`, `webui,discord`, or `webui,telegram`. |
+| `PLATFORM` | `webui` | Enables the WebUI and optionally Discord, Telegram, or both: `webui`, `webui,discord`, `webui,telegram`, or `webui,discord,telegram`. |
 | `ZEUS_PROVIDER` | unset | Preferred provider: `ollama`, `lmstudio`, or `llamacpp`. If unset, ZEUS selects a reachable provider. |
 | `ZEUS_MODEL` | unset | Preferred model ID. Leave empty to use the first model discovered by the selected provider. The WebUI can also select a model per conversation. |
 | `LLM_HOST` | provider-dependent | Hostname or IP address of the model server when running ZEUS directly on the host. |

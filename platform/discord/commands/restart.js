@@ -14,7 +14,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'restart' },
+            body: { action: 'restart', platform: process.env.PLATFORM || 'discord' },
         });
         await message.reply('Restart requested. Begin restarting... Done!');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

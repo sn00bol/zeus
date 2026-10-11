@@ -37,15 +37,100 @@ class RunLogRecorderTests(unittest.TestCase):
 
 
 class ManagedDatabaseTests(unittest.TestCase):
-    def test_selected_platforms_always_include_webui_and_allow_one_bot(self) -> None:
+    def test_selected_platforms_always_include_webui_and_allow_both_bots(self) -> None:
         self.assertEqual(app._selected_platforms(""), ("webui",))
         self.assertEqual(app._selected_platforms("discord"), ("webui", "discord"))
         self.assertEqual(
             app._selected_platforms("webui,telegram"),
             ("webui", "telegram"),
         )
-        with self.assertRaisesRegex(RuntimeError, "at most one"):
-            app._selected_platforms("webui,discord,telegram")
+        self.assertEqual(
+            app._selected_platforms("telegram,webui,discord,telegram"),
+            ("webui", "discord", "telegram"),
+        )
+
+    def test_control_poll_returns_action_and_target_platform(self) -> None:
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"action":"restart","platform":"telegram"}'
+        with patch("app.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value = response
+            self.assertEqual(app._poll_control(5000), ("restart", "telegram"))
+
+    def test_run_platforms_starts_one_bridge_and_each_bot_with_webui(self) -> None:
+        process = MagicMock()
+        process.poll.return_value = None
+        environment = {
+            "ZEUS_MANAGED_DATABASE": "true",
+            "DISCORD_BOT_API_KEY": "discord-token",
+            "TELEGRAM_BOT_API_KEY": "telegram-token",
+            "PFX": "!",
+            "DB_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict("os.environ", environment, clear=True),
+            patch("app.shutil.which", return_value="node"),
+            patch("app.subprocess.Popen", return_value=process) as popen,
+            patch("app._wait_for_bridge"),
+            patch("app._start_webui", return_value=process),
+            patch("app._poll_control", side_effect=KeyboardInterrupt),
+            patch("app._stop_process"),
+        ):
+            self.assertEqual(
+                app.run_platforms(names=("discord", "telegram"), with_webui=True),
+                0,
+            )
+
+        self.assertEqual(popen.call_count, 3)
+        self.assertEqual(
+            popen.call_args_list[0].args[0],
+            [app.sys.executable, "-m", "src.discord_bridge"],
+        )
+        self.assertEqual(
+            [call.args[0][-1] for call in popen.call_args_list[1:]],
+            [
+                str(app.ROOT / "platform" / "discord" / "index.js"),
+                str(app.ROOT / "platform" / "telegram" / "index.js"),
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs["env"]["PLATFORM"] for call in popen.call_args_list[1:]],
+            ["discord", "telegram"],
+        )
+        self.assertNotEqual(
+            popen.call_args_list[1].kwargs["env"]["HEALTHCHECK_PORT"],
+            popen.call_args_list[2].kwargs["env"]["HEALTHCHECK_PORT"],
+        )
+
+    def test_restart_control_restarts_only_the_requested_bot(self) -> None:
+        process = MagicMock()
+        process.poll.return_value = None
+        environment = {
+            "ZEUS_MANAGED_DATABASE": "true",
+            "DISCORD_BOT_API_KEY": "discord-token",
+            "TELEGRAM_BOT_API_KEY": "telegram-token",
+            "PFX": "!",
+            "DB_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict("os.environ", environment, clear=True),
+            patch("app.shutil.which", return_value="node"),
+            patch("app.subprocess.Popen", return_value=process) as popen,
+            patch("app._wait_for_bridge"),
+            patch("app._wait_for_exit", return_value=True),
+            patch(
+                "app._poll_control",
+                side_effect=[("restart", "telegram"), KeyboardInterrupt],
+            ),
+            patch("app._stop_process"),
+        ):
+            self.assertEqual(app.run_platforms(names=("discord", "telegram")), 0)
+
+        self.assertEqual(popen.call_count, 4)
+        self.assertEqual(
+            popen.call_args_list[3].args[0],
+            popen.call_args_list[2].args[0],
+        )
 
     def test_webui_starts_its_node_runtime_without_reusing_a_platform_bridge(self) -> None:
         server = MagicMock()
@@ -97,12 +182,12 @@ class ManagedDatabaseTests(unittest.TestCase):
                 clear=True,
             ),
             patch("sys.argv", ["app.py"]),
-            patch.object(app, "run_platform", return_value=0) as run_platform,
+            patch.object(app, "run_platforms", return_value=0) as run_platforms,
         ):
             self.assertEqual(app.main(), 0)
 
-        run_platform.assert_called_once_with(
-            name="telegram",
+        run_platforms.assert_called_once_with(
+            names=("telegram",),
             record_logs=False,
             with_webui=True,
         )

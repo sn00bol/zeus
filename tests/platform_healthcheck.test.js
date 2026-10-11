@@ -61,3 +61,26 @@ test('healthcheck verifies WebUI and the selected bot', async () => {
         }
     });
 });
+
+test('healthcheck verifies WebUI and both selected bots', async () => {
+    await withHealthServers(3, async ([webuiPort, discordPort, telegramPort]) => {
+        const previous = {
+            platform: process.env.PLATFORM,
+            webuiPort: process.env.WEBUI_PORT,
+            healthcheckPort: process.env.HEALTHCHECK_PORT,
+        };
+        process.env.PLATFORM = 'webui,discord,telegram';
+        process.env.WEBUI_PORT = String(webuiPort);
+        process.env.HEALTHCHECK_PORT = String(discordPort);
+        try {
+            assert.deepEqual(await checkHealth(), ['ready', 'ready', 'ready']);
+        } finally {
+            if (previous.platform === undefined) delete process.env.PLATFORM;
+            else process.env.PLATFORM = previous.platform;
+            if (previous.webuiPort === undefined) delete process.env.WEBUI_PORT;
+            else process.env.WEBUI_PORT = previous.webuiPort;
+            if (previous.healthcheckPort === undefined) delete process.env.HEALTHCHECK_PORT;
+            else process.env.HEALTHCHECK_PORT = previous.healthcheckPort;
+        }
+    });
+});

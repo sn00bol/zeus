@@ -14,7 +14,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'stop' },
+            body: { action: 'stop', platform: process.env.PLATFORM || 'discord' },
         });
         await message.reply('Safe shutdown requested. The bot will stop shortly, have a good day!');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

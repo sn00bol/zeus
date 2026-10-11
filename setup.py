@@ -47,7 +47,7 @@ BANNER = f"""{Colors.CYAN}{Colors.BOLD}
    ███╔╝  ██╔══╝  ██║  ██║╚════██║
   ███████╗███████╗╚█████╔╝███████║
   ╚══════╝╚══════╝ ╚════╝ ╚══════╝
-{Colors.RESET}{Colors.DIM} A self-hosting AI Agent{Colors.RESET}
+{Colors.RESET}{Colors.DIM} Welcome to ZEUS! Please follow the prompts to configure your setup{Colors.RESET}
 """
 
 def print_step(title: str) -> None:
@@ -217,12 +217,10 @@ def _normalize_platform_selection(value: str) -> str:
         selected = ["webui"]
     if "webui" not in selected:
         selected.insert(0, "webui")
-    optional = [name for name in selected if name in OPTIONAL_PLATFORMS]
+    optional = [name for name in OPTIONAL_PLATFORMS if name in selected]
     unsupported = set(selected) - {"webui", *OPTIONAL_PLATFORMS}
     if unsupported:
         raise ValueError(f"Unsupported platform selection: {', '.join(sorted(unsupported))}.")
-    if len(optional) > 1:
-        raise ValueError("Select at most one additional platform: Discord or Telegram.")
     return ",".join(["webui", *optional])
 
 
@@ -231,13 +229,19 @@ def choose_platform(
     current_platform: str = "webui",
 ) -> str:
     default = _normalize_platform_selection(current_platform)
-    default_choice = {"webui": "1", "webui,discord": "2", "webui,telegram": "3"}[default]
+    default_choice = {
+        "webui": "1",
+        "webui,discord": "2",
+        "webui,telegram": "3",
+        "webui,discord,telegram": "4",
+    }[default]
     if input_fn is not None or not (sys.stdin.isatty() and sys.stdout.isatty()):
         print_step("Select Platforms")
         options = [
             ("1", "WebUI (required)"),
             ("2", "WebUI + Discord"),
             ("3", "WebUI + Telegram (Experimental)"),
+            ("4", "WebUI + Discord + Telegram (Experimental)"),
         ]
         for value, label in options:
             marker = " (default)" if value == default_choice else ""
@@ -252,7 +256,9 @@ def choose_platform(
                 return "webui,discord"
             if answer in {"3", "telegram"}:
                 return "webui,telegram"
-            print_error("Choose WebUI only, WebUI + Discord, or WebUI + Telegram.")
+            if answer in {"4", "discord,telegram", "telegram,discord"}:
+                return "webui,discord,telegram"
+            print_error("Choose WebUI only, WebUI + Discord, WebUI + Telegram, or both bots.")
 
     selected = _normalize_platform_selection(current_platform).split(",")
     cursor = 1
@@ -289,12 +295,12 @@ def choose_platform(
             if choice in selected:
                 selected.remove(choice)
             else:
-                selected = ["webui", choice]
+                selected.append(choice)
             sys.stdout.write("\033[4A")
             render()
         elif key == "enter":
-            optional = next((name for name in OPTIONAL_PLATFORMS if name in selected), None)
-            return f"webui,{optional}" if optional else "webui"
+            optional = [name for name in OPTIONAL_PLATFORMS if name in selected]
+            return ",".join(["webui", *optional])
 
 
 def choose_provider(
@@ -432,7 +438,7 @@ def setup_project(
                     print_error("Token cannot be empty!")
             config["DISCORD_BOT_API_KEY"] = bot_token
             config["PFX"] = existing.get("PFX", "")
-        elif (
+        if (
             "telegram" in selected
             and existing.get("TELEGRAM_BOT_API_KEY") in {None, "", "YOUR_BOT_TOKEN"}
         ):
@@ -504,7 +510,7 @@ def setup_project(
             bot_prefix = prompt("Enter Bot Prefix (default empty): ").strip()
             config["DISCORD_BOT_API_KEY"] = bot_token
             config["PFX"] = bot_prefix
-        elif "telegram" in selected:
+        if "telegram" in selected:
             print_step("Telegram Bot Settings")
             bot_token = ""
             while not bot_token:

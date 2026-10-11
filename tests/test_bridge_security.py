@@ -94,6 +94,47 @@ class BridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(status, 413)
             self.assertIn("too large", json.loads(responses[1]["body"])["error"])
 
+    async def test_supervisor_control_preserves_target_platform(self) -> None:
+        for bridge, platform in (
+            (discord_bridge, "discord"),
+            (telegram_bridge, "telegram"),
+        ):
+            while not bridge._control_queue.empty():
+                bridge._control_queue.get_nowait()
+            body = json.dumps({"action": "restart", "platform": platform}).encode()
+            with patch.object(bridge, "_BRIDGE_TOKEN", "expected-token"):
+                _, status = await self._call(
+                    bridge,
+                    {
+                        "type": "http",
+                        "method": "POST",
+                        "path": "/control",
+                        "headers": [(b"authorization", b"Bearer expected-token")],
+                    },
+                    AsyncMock(return_value={
+                        "type": "http.request",
+                        "body": body,
+                        "more_body": False,
+                    }),
+                )
+                responses, poll_status = await self._call(
+                    bridge,
+                    {
+                        "type": "http",
+                        "method": "GET",
+                        "path": "/control/next",
+                        "headers": [(b"authorization", b"Bearer expected-token")],
+                    },
+                    AsyncMock(),
+                )
+
+            self.assertEqual(status, 202)
+            self.assertEqual(poll_status, 200)
+            self.assertEqual(json.loads(responses[1]["body"]), {
+                "action": "restart",
+                "platform": platform,
+            })
+
 
 if __name__ == "__main__":
     unittest.main()

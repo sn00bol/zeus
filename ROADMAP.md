@@ -30,4 +30,4 @@ TODOS:
 - Add random text for fun when start new chat
 - Improving webui and menu bar, format text
 - Add ZEUS Webui settings, model selection more advance
-- Add search, pin, support image/file,... (and no limits)
+- Add support image/file,... (and no limits)

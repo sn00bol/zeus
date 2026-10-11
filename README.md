@@ -29,7 +29,7 @@ python setup.py
 docker compose up --build -d
 ```
 
-The WebUI is available at `http://localhost:3000` (or the port configured by `WEBUI_PORT` in `.env`). Discord or Telegram can also run alongside it when selected in `setup.py` and configured it via `.env` (`PLATFORM`).
+The WebUI is available at `http://localhost:3000` (or the port configured by `WEBUI_PORT` in `.env`). Discord and Telegram can both run alongside it when selected in `setup.py` and configured in `.env` (`PLATFORM`).
 
 For full native install, running docker, update and troubleshooting instruct, check at [setup guide](docs/SETUP.md).
 

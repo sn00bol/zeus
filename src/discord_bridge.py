@@ -54,7 +54,7 @@ _memory_store = MemoryStore(_database)
 _router = Router(memory_store=_memory_store, session_manager=_session_manager)
 _agent_store = AgentRunStore(_database)
 _agent_runner = AgentRunner(_router, _agent_store)
-_control_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
+_control_queue: asyncio.Queue[dict[str, str]] = asyncio.Queue(maxsize=1)
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -231,10 +231,10 @@ class BridgeApplication:
             return
         if method == "GET" and path == "/control/next":
             try:
-                action = _control_queue.get_nowait()
+                control = _control_queue.get_nowait()
             except asyncio.QueueEmpty:
-                action = None
-            await _send_json(send, {"action": action})
+                control = None
+            await _send_json(send, control or {"action": None, "platform": None})
             return
         if method == "GET" and path == "/sessions/usage":
             query = parse_qs(scope.get("query_string", b"").decode("ascii", errors="replace"))
@@ -287,12 +287,20 @@ class BridgeApplication:
             if action not in {"restart", "stop"}:
                 await _send_json(send, {"error": "action must be restart or stop"}, status=400)
                 return
+            platform = str(body.get("platform") or "discord")
+            if platform not in {"discord", "telegram"}:
+                await _send_json(send, {"error": "platform must be discord or telegram"}, status=400)
+                return
             try:
-                _control_queue.put_nowait(action)
+                _control_queue.put_nowait({"action": action, "platform": platform})
             except asyncio.QueueFull:
                 await _send_json(send, {"error": "A supervisor action is already pending."}, status=409)
                 return
-            await _send_json(send, {"accepted": True, "action": action}, status=202)
+            await _send_json(
+                send,
+                {"accepted": True, "action": action, "platform": platform},
+                status=202,
+            )
             return
 
         if method == "GET" and path.startswith("/agent/runs/"):

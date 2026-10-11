@@ -447,13 +447,14 @@ class Router:
         }
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        explicit_think = "think" in extra
+        payload.pop("think", None)
         if provider.name == "ollama":
-            payload.setdefault("think", think)
-        elif think:
+            payload["reasoning_effort"] = "medium" if think else "none"
+        elif think or explicit_think:
             template = dict(payload.get("chat_template_kwargs") or {})
-            template.setdefault("enable_thinking", True)
+            template["enable_thinking"] = think
             payload["chat_template_kwargs"] = template
-            payload.setdefault("think", True)
         return payload
 
     @staticmethod

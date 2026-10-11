@@ -46,7 +46,8 @@ Compose starts the WebUI and database together. You do not need to run
      Compose service or on another machine, use that service name or reachable
      hostname instead.
    - Leave `PLATFORM=webui` for WebUI-only. For a bot, use
-     `PLATFORM=webui,discord` or `PLATFORM=webui,telegram` and fill in its token.
+     `PLATFORM=webui,discord` or `PLATFORM=webui,telegram`; to run both use
+     `PLATFORM=webui,discord,telegram`. Fill in the token for each selected bot.
      Discord also requires `PFX`.
    - Set `BRIDGE_TOKEN` to a long random value for the private Discord/Telegram
      bridge. Running `python setup.py` generates and saves it automatically.
@@ -131,5 +132,6 @@ For development or a host-managed PostgreSQL server:
    python app.py
    ```
 
-The supervisor starts the WebUI and its private inference bridge. If Discord
-or Telegram is selected, it starts that bot and its platform bridge as well.
+The supervisor starts the WebUI and its private inference bridge. Discord and
+Telegram can be selected together; the supervisor starts both bot processes
+and shares their platform inference bridge.
