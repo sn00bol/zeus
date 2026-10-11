@@ -52,6 +52,12 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             /<meta name="zeus-boot-id" content="([^"]+)">/,
         )[1];
 
+        const theme = await requestRaw('/js/theme.js');
+        assert.equal(theme.status, 200);
+        assert.match(theme.body.toString('utf8'), /--accent:\s*#fb923c/);
+        assert.match(theme.body.toString('utf8'), /background:\s*#100d0b/);
+        assert.doesNotMatch(theme.body.toString('utf8'), /#a78bfa|#c4b5fd/);
+
         const banner = await requestRaw('/ZEUSbanner.png');
         assert.equal(banner.status, 200);
         assert.equal(banner.headers['content-type'], 'image/png');
