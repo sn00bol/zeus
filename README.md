@@ -1,5 +1,5 @@
 <div align="center">
-<img alt="ZEUS" src="assets/ZEUS.png" />
+<img width=250 height=250 alt="ZEUS" src="assets/ZEUS.png" />
   <p>A self-hosting AI Agent for WebUI, Discord, and Telegram</p>
   <p>
     <a href="#features">Features</a> ·
