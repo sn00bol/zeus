@@ -1,18 +1,29 @@
 export function renderStreamDetails(container, details) {
-    if (!details || (!details.provider && !details.model)) return;
+    if (!details || (
+        !details.provider && !details.model && !details.context_length
+    )) return;
     container.replaceChildren();
 
-    const label = document.createElement('span');
-    label.className = 'stream-details-label';
-    label.textContent = [details.provider, details.model].filter(Boolean).join(' · ');
-    container.append(label);
-
-    const usage = [];
-    if (Number.isFinite(details.prompt_tokens) && details.prompt_tokens > 0) {
-        usage.push(`${details.prompt_tokens} prompt tokens`);
+    if (details.provider || details.model) {
+        const label = document.createElement('span');
+        label.className = 'stream-details-label';
+        label.textContent = [details.provider, details.model].filter(Boolean).join(' · ');
+        container.append(label);
     }
-    if (Number.isFinite(details.completion_tokens) && details.completion_tokens > 0) {
-        usage.push(`${details.completion_tokens} completion tokens`);
+
+    const promptTokens = Number.isFinite(details.prompt_tokens) ? details.prompt_tokens : 0;
+    const completionTokens = Number.isFinite(details.completion_tokens)
+        ? details.completion_tokens
+        : 0;
+    const usage = [];
+    if (promptTokens > 0 || completionTokens > 0) {
+        const totalTokens = new Intl.NumberFormat().format(promptTokens + completionTokens);
+        usage.push(
+            `Tokens: ${totalTokens} (${promptTokens} prompt · ${completionTokens} completion)`,
+        );
+    }
+    if (Number.isFinite(details.context_length) && details.context_length > 0) {
+        usage.push(`Context: ${new Intl.NumberFormat().format(details.context_length)} tokens`);
     }
     if (usage.length) {
         const usageLabel = document.createElement('span');

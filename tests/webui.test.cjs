@@ -20,8 +20,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const { port } = server.address();
-    const request = path => new Promise((resolve, reject) => {
-        http.get({ host: '127.0.0.1', port, path }, response => {
+    const request = (path, targetPort = port) => new Promise((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port: targetPort, path }, response => {
             const chunks = [];
             response.on('data', chunk => chunks.push(chunk));
             response.on('end', () => resolve({
@@ -30,8 +30,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             }));
         }).on('error', reject);
     });
-    const requestRaw = path => new Promise((resolve, reject) => {
-        http.get({ host: '127.0.0.1', port, path }, response => {
+    const requestRaw = (path, targetPort = port) => new Promise((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port: targetPort, path }, response => {
             const chunks = [];
             response.on('data', chunk => chunks.push(chunk));
             response.on('end', () => resolve({
@@ -46,6 +46,34 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         const page = await requestRaw('/');
         assert.equal(page.status, 200);
         assert.match(page.body.toString('utf8'), /<link rel="icon" href="\/zeus\.ico"/);
+        assert.match(page.body.toString('utf8'), /<meta name="zeus-boot-id" content="[a-f0-9-]{36}">/);
+        assert.match(page.body.toString('utf8'), /src="\/ZEUSbanner\.png"/);
+        const currentBootId = page.body.toString('utf8').match(
+            /<meta name="zeus-boot-id" content="([^"]+)">/,
+        )[1];
+
+        const banner = await requestRaw('/ZEUSbanner.png');
+        assert.equal(banner.status, 200);
+        assert.equal(banner.headers['content-type'], 'image/png');
+        assert.deepEqual([...banner.body.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+
+        const restartedServer = createWebUiServer({
+            db: {},
+            bridgeRequest: async () => ({}),
+        });
+        await new Promise(resolve => restartedServer.listen(0, '127.0.0.1', resolve));
+        try {
+            const restartedPort = restartedServer.address().port;
+            const restartedPage = await requestRaw('/', restartedPort);
+            const restartedBootId = restartedPage.body.toString('utf8').match(
+                /<meta name="zeus-boot-id" content="([^"]+)">/,
+            )[1];
+            assert.notEqual(restartedBootId, currentBootId);
+        } finally {
+            await new Promise((resolve, reject) => restartedServer.close(error => (
+                error ? reject(error) : resolve()
+            )));
+        }
 
         const icon = await requestRaw('/zeus.ico');
         assert.equal(icon.status, 200);

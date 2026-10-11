@@ -72,6 +72,7 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
                     "provider": "ollama",
                     "prompt_tokens": 4,
                     "completion_tokens": 2,
+                    "context_length": 8192,
                     "finish_reason": "stop",
                 })()
 
@@ -99,6 +100,7 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response[0]["status"], 200)
         self.assertEqual(response_json(response)["content"], "answer")
+        self.assertEqual(response_json(response)["context_length"], 8192)
         self.assertEqual(sessions.kwargs["platform"], "webui")
         self.assertEqual(router.request.session, "session")
         self.assertEqual(router.request.platform, "webui")

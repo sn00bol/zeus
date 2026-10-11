@@ -17,7 +17,8 @@ const themeStyles = String.raw`
         .app { height: 100vh; height: 100dvh; overflow: hidden; }
         .sidebar { position: fixed; z-index: 20; inset: 0 auto 0 0; width: 250px; height: 100vh; height: 100dvh; overflow: visible; background: #0e121a; border-right: 1px solid var(--line); transition: width .22s ease; }
         .menubar { position: relative; z-index: 22; width: 100%; height: 66px; flex: none; padding: 0 17px; display: flex; align-items: center; background: #0e121a; }
-        .menubar-brand { position: absolute; left: 17px; color: #e8e4f7; font-size: 14px; font-weight: 800; letter-spacing: .17em; opacity: 1; transform: translateX(0); transition: opacity .14s ease, transform .2s ease; }
+        .menubar-brand { position: absolute; left: 17px; width: 88px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; cursor: pointer; opacity: 1; transform: translateX(0); transition: opacity .14s ease, transform .2s ease; }
+        .menubar-brand img { display: block; width: 100%; height: auto; }
         .menu-toggle { position: absolute; right: 17px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; color: #d4d8e2; background: transparent; cursor: pointer; transition: right .22s ease; }
         .menu-toggle:hover { background: #ffffff0a; }
         .sidebar-content { position: absolute; inset: 66px auto 0 0; width: 250px; overflow: hidden; padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 14px; opacity: 1; transform: translateX(0); transition: opacity .14s ease .06s, transform .22s ease; }
@@ -28,6 +29,9 @@ const themeStyles = String.raw`
         .new-chat { width: 100%; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; color: #cbd5e1; background: transparent; padding: 6px 10px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background .15s, color .15s; }
         .new-chat:hover { background: #ffffff0c; color: #fff; }
         .conversation-section { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+        .conversation-section[hidden] { display: none; }
+        #pinned-section { flex: none; }
+        #pinned-list { max-height: 30vh; flex: none; }
         .side-label { width: 100%; flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border: 0; border-radius: 7px; color: #a3aaba; background: transparent; text-align: left; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
         .side-label:hover { color: #edf0f7; background: #ffffff08; }
         .conversation-toggle-icon { flex: none; color: #818b9d; transition: transform .18s ease; }

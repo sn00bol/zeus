@@ -31,9 +31,10 @@ Provider default ports:
 | LM Studio | `1234` |
 | llama.cpp server | `8080` |
 
-`LLM_HOST` takes precedence over provider-specific host variables. When
-`LLM_PORT` is empty, ZEUS also recognizes `OLLAMA_PORT`, `LMSTUDIO_PORT`, or
-`LLAMACPP_PORT` for the matching provider.
+`LLM_HOST` and `LLM_PORT` configure only the provider named by `ZEUS_PROVIDER`.
+Other providers use their provider-specific host and port variables (or their
+defaults), so model discovery does not query the selected provider's endpoint
+as if it belonged to every provider.
 
 ### Model API keys
 

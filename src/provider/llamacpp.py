@@ -26,7 +26,13 @@ try:
 except ImportError:
     httpx = None  # type: ignore[assignment]
 
-from .base import BaseProvider, ModelInfo, ModelLimits, ProviderEndpoint
+from .base import (
+    BaseProvider,
+    ModelInfo,
+    ModelLimits,
+    ProviderEndpoint,
+    _resolve_provider_address,
+)
 
 _DEFAULT_HOST = "localhost"
 _DEFAULT_PORT = 8080
@@ -42,10 +48,14 @@ class LlamaCppProvider(BaseProvider):
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        _host = host or os.environ.get("LLM_HOST") or os.environ.get("LLAMACPP_HOST", _DEFAULT_HOST)
-        port_value = os.environ.get("LLM_PORT") or os.environ.get("LLAMACPP_PORT")
-        _port = port or (
-            _DEFAULT_PORT if not port_value or port_value.lower() == "default" else int(port_value)
+        _host, _port = _resolve_provider_address(
+            self.name,
+            _DEFAULT_HOST,
+            _DEFAULT_PORT,
+            "LLAMACPP_HOST",
+            "LLAMACPP_PORT",
+            host,
+            port,
         )
         super().__init__(_host, _port)
         # Cache the props fetched from /props so we don't hit it repeatedly

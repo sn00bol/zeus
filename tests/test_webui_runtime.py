@@ -319,6 +319,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                     max_tokens=None,
                     api_token=None,
                     session=None,
+                    context_length=8192,
                 )
 
         router = Router(model_manager=FakeModelManager())
@@ -326,7 +327,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         router._get_client = lambda: _async_value(client)
         deltas = []
 
-        await router.route_stream(
+        response = await router.route_stream(
             SimpleNamespace(
                 messages=[SimpleNamespace(role="user", content="hi")],
                 model="deepseek-r1",
@@ -342,6 +343,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(client.call[2]["json"]["think"])
+        self.assertEqual(response.context_length, 8192)
 
 
 

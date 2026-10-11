@@ -77,6 +77,10 @@ async function readJson(request) {
 
 function sendStatic(response, filePath, contentType) {
     const body = fs.readFileSync(filePath);
+    sendContent(response, body, contentType);
+}
+
+function sendContent(response, body, contentType) {
     response.writeHead(200, {
         'Content-Type': contentType,
         'Content-Length': body.length,
@@ -91,6 +95,7 @@ function createWebUiServer({
     bridgeRequest = requestJson,
     streamManager = new StreamManager(),
 } = {}) {
+    const bootId = randomUUID();
     const callBridge = async (route, options) => {
         try {
             return await bridgeRequest(route, options);
@@ -112,7 +117,15 @@ function createWebUiServer({
                 return;
             }
             if (request.method === 'GET' && url.pathname === '/') {
-                sendStatic(response, path.join(__dirname, 'index.html'), 'text/html; charset=utf-8');
+                const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
+                    .replace('<meta name="zeus-boot-id" content="">', (
+                        `<meta name="zeus-boot-id" content="${bootId}">`
+                    ));
+                sendContent(response, Buffer.from(html, 'utf8'), 'text/html; charset=utf-8');
+                return;
+            }
+            if (request.method === 'GET' && url.pathname === '/ZEUSbanner.png') {
+                sendStatic(response, path.join(__dirname, 'ZEUSbanner.png'), 'image/png');
                 return;
             }
             if (request.method === 'GET' && url.pathname === '/zeus.ico') {
@@ -399,6 +412,7 @@ function createWebUiServer({
                         usage: {
                             prompt_tokens: Number(result.prompt_tokens) || 0,
                             completion_tokens: Number(result.completion_tokens) || 0,
+                            context_length: Number(result.context_length) || null,
                         },
                         timestamp: new Date().toISOString(),
                     };
@@ -408,6 +422,7 @@ function createWebUiServer({
                         model: result.model,
                         prompt_tokens: assistantMessage.usage.prompt_tokens,
                         completion_tokens: assistantMessage.usage.completion_tokens,
+                        context_length: assistantMessage.usage.context_length,
                     });
                     publish('ui_control', { state: 'complete' });
                     publish('done', { message: assistantMessage });

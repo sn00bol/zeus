@@ -3,6 +3,8 @@ import { selectSession, startNewSession } from './session.js';
 export function initializeSidebar({ api, sessionId }) {
     const appElement = document.getElementById('app');
     const list = document.getElementById('conversation-list');
+    const pinnedSection = document.getElementById('pinned-section');
+    const pinnedList = document.getElementById('pinned-list');
     const deleteDialog = document.getElementById('delete-dialog');
     const deleteTitle = document.getElementById('delete-chat-title');
 
@@ -105,6 +107,14 @@ export function initializeSidebar({ api, sessionId }) {
         allConversations = conversations; // cache for search
         document.querySelectorAll('.conversation-menu').forEach(el => el.remove());
         list.replaceChildren();
+        pinnedList.replaceChildren();
+        const pinnedConversations = conversations.filter(
+            conversation => conversation.metadata?.pinned,
+        );
+        const otherConversations = conversations.filter(
+            conversation => !conversation.metadata?.pinned,
+        );
+        pinnedSection.hidden = pinnedConversations.length === 0;
         if (conversations.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'conversation-empty';
@@ -114,6 +124,7 @@ export function initializeSidebar({ api, sessionId }) {
         }
 
         for (const conversation of conversations) {
+            const targetList = conversation.metadata?.pinned ? pinnedList : list;
             const row = document.createElement('div');
             row.className = 'conversation-row';
             if (conversation.conversation_id === sessionId) {
@@ -242,8 +253,14 @@ export function initializeSidebar({ api, sessionId }) {
             addMenuAction('Delete', 'delete', {}, true);
             actions.append(pin, more);
             row.append(item, actions);
-            list.append(row);
+            targetList.append(row);
             document.body.append(menu);
+        }
+        if (otherConversations.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'conversation-empty';
+            empty.textContent = 'No other conversations';
+            list.append(empty);
         }
     }
 
@@ -357,6 +374,12 @@ export function initializeSidebar({ api, sessionId }) {
         const expanded = conversationToggle.getAttribute('aria-expanded') === 'true';
         conversationToggle.setAttribute('aria-expanded', String(!expanded));
         list.hidden = expanded;
+    });
+    const pinnedToggle = document.getElementById('pinned-toggle');
+    pinnedToggle.addEventListener('click', () => {
+        const expanded = pinnedToggle.getAttribute('aria-expanded') === 'true';
+        pinnedToggle.setAttribute('aria-expanded', String(!expanded));
+        pinnedList.hidden = expanded;
     });
 
     document.addEventListener('click', event => {

@@ -1,4 +1,5 @@
 const sessionKey = 'zeus.webui.conversationId';
+const bootKey = 'zeus.webui.bootId';
 
 export function createSessionId() {
     return typeof crypto.randomUUID === 'function'
@@ -7,8 +8,13 @@ export function createSessionId() {
 }
 
 export function getSessionId() {
+    const bootId = document.querySelector('meta[name="zeus-boot-id"]')?.content;
     let id = localStorage.getItem(sessionKey);
-    if (!id) {
+    if (bootId && localStorage.getItem(bootKey) !== bootId) {
+        id = createSessionId();
+        localStorage.setItem(bootKey, bootId);
+        localStorage.setItem(sessionKey, id);
+    } else if (!id) {
         id = createSessionId();
         localStorage.setItem(sessionKey, id);
     }
@@ -45,6 +51,7 @@ export async function loadSessionHistory({
                 renderStreamDetails(rendered.details, {
                     prompt_tokens: Number(message.usage.prompt_tokens),
                     completion_tokens: Number(message.usage.completion_tokens),
+                    context_length: Number(message.usage.context_length),
                     provider: message.provider,
                     model: message.model,
                 });

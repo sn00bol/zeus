@@ -13,7 +13,7 @@ from core.memory import MemoryStore
 from core.session import Session, SessionStore
 from core.session_manager import SessionManager
 from router.router import Router
-from src.provider import ModelInfo
+from src.provider import LlamaCppProvider, LMStudioProvider, ModelInfo, OllamaProvider
 from src.provider.base import ModelLimits
 from src import discord_bridge
 
@@ -574,6 +574,44 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.session.session_id, 11)
         self.assertEqual(request.platform, "discord")
         self.assertEqual(responses[0]["status"], 202)
+
+
+class ProviderEndpointConfigurationTests(unittest.TestCase):
+    def test_shared_endpoint_is_limited_to_configured_provider(self) -> None:
+        with patch.dict(os.environ, {
+            "ZEUS_PROVIDER": "ollama",
+            "LLM_HOST": "ollama.example",
+            "LLM_PORT": "11434",
+        }, clear=True):
+            self.assertEqual((OllamaProvider().host, OllamaProvider().port), (
+                "ollama.example",
+                11434,
+            ))
+            self.assertEqual((LMStudioProvider().host, LMStudioProvider().port), (
+                "localhost",
+                1234,
+            ))
+            self.assertEqual((LlamaCppProvider().host, LlamaCppProvider().port), (
+                "localhost",
+                8080,
+            ))
+
+    def test_provider_specific_endpoint_is_used_for_non_selected_provider(self) -> None:
+        with patch.dict(os.environ, {
+            "ZEUS_PROVIDER": "lmstudio",
+            "LLM_HOST": "lmstudio.example",
+            "LLM_PORT": "1235",
+            "OLLAMA_HOST": "ollama.example",
+            "OLLAMA_PORT": "11435",
+        }, clear=True):
+            self.assertEqual((LMStudioProvider().host, LMStudioProvider().port), (
+                "lmstudio.example",
+                1235,
+            ))
+            self.assertEqual((OllamaProvider().host, OllamaProvider().port), (
+                "ollama.example",
+                11435,
+            ))
 
 
 if __name__ == "__main__":

@@ -56,6 +56,9 @@ function getThinkParam() {
     return undefined;
 }
 const sidebar = initializeSidebar({ api, sessionId: conversationId });
+document.getElementById('menubar-brand').addEventListener('click', () => {
+    window.location.reload();
+});
 
 function setEmptyChatLayout(empty) {
     if (empty) {

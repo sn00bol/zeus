@@ -5,6 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0b0e14">
+    <meta name="zeus-boot-id" content="">
     <title>ZEUS</title>
     <link rel="icon" href="/zeus.ico" sizes="any">
     <style>
@@ -27,7 +28,10 @@
     <div class="app" id="app">
         <aside class="sidebar" id="conversation-menu">
             <div class="menubar">
-                <span class="menubar-brand">ZEUS</span>
+                <button class="menubar-brand" id="menubar-brand" type="button" title="Reload ZEUS"
+                    aria-label="Reload ZEUS">
+                    <img src="/ZEUSbanner.png" alt="ZEUS">
+                </button>
                 <button class="menu-toggle" id="menu-toggle" type="button" aria-label="Collapse menu"
                     aria-expanded="true" aria-controls="sidebar-content">
                     <img src="/icon/sidebar.png" width="16" height="16" alt="Sidebar" class="sidebar-icon">
@@ -53,6 +57,17 @@
                     <img src="/icon/search.png" width="13" height="13" alt="" class="search-btn-icon">
                     <span>Search</span>
                 </button>
+                <section class="conversation-section" id="pinned-section" hidden>
+                    <button class="side-label" id="pinned-toggle" type="button" aria-expanded="true"
+                        aria-controls="pinned-list">
+                        <span>Pinned</span>
+                        <svg class="conversation-toggle-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="conversation-list" id="pinned-list"></div>
+                </section>
                 <section class="conversation-section">
                     <button class="side-label" id="conversation-toggle" type="button" aria-expanded="true"
                         aria-controls="conversation-list">

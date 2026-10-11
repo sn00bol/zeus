@@ -20,6 +20,7 @@ from .base import (
     ModelInfo,
     ModelLimits,
     ProviderEndpoint,
+    _resolve_provider_address,
     detect_family,
     detect_modalities,
 )
@@ -38,10 +39,14 @@ class OllamaProvider(BaseProvider):
         host: str | None = None,
         port: int | None = None,
     ) -> None:
-        _host = host or os.environ.get("LLM_HOST") or os.environ.get("OLLAMA_HOST", _DEFAULT_HOST)
-        port_value = os.environ.get("LLM_PORT") or os.environ.get("OLLAMA_PORT")
-        _port = port or (
-            _DEFAULT_PORT if not port_value or port_value.lower() == "default" else int(port_value)
+        _host, _port = _resolve_provider_address(
+            self.name,
+            _DEFAULT_HOST,
+            _DEFAULT_PORT,
+            "OLLAMA_HOST",
+            "OLLAMA_PORT",
+            host,
+            port,
         )
         super().__init__(_host, _port)
 

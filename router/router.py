@@ -112,6 +112,7 @@ class InferenceResponse:
     finish_reason: str = "stop"
     thinking: str = ""                  # model reasoning, when enabled
     raw: dict[str, Any] = field(default_factory=dict)  # full backend response
+    context_length: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +265,7 @@ class Router:
             response = self._parse_response(
                 raw_response, effective_provider, final_context.model_name
             )
+            response.context_length = final_context.context_length
             await self._record_response(request, final_context, response)
 
             latency = round((time.perf_counter() - start_time) * 1000.0, 2)
@@ -354,6 +356,7 @@ class Router:
                 finish_reason=finish_reason,
                 thinking=thinking,
                 raw={"stream": True},
+                context_length=context.context_length,
             )
             await self._record_response(request, context, response)
 
