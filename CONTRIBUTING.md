@@ -52,8 +52,8 @@ Please investigate carefully to help fix potential bugs in Zeus as quickly as po
 - Check the [Bug Tracker](/issues?q=label%3Abug) to see if the issue was already reported.
 - Collect relevant details:
     - OS (ONLY accept Window 10+/Any linux distro)
-    - GPU Nvidia (Not supporting AMD or INTEL card, or it could run with a lot of bugs)
-    - Steps to reproduce the issue (e.g., "Ask bot to search who is Napoleon -> Bot finding -> crash").
+    - GPU Nvidia (Not supporting AMD or INTEL card cuz im broke, or it could run with a lot of bugs)
+    - Steps to reproduce the issue (e.g., "Ask bot to search who is Napoleon -> Bot finding in SEARXNG -> crash").
     - Log / Stack trace if available.
 
 #### How Do I Submit a Good Bug Report?

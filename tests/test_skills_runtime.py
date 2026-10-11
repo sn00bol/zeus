@@ -34,7 +34,7 @@ class SkillRuntimeTests(unittest.TestCase):
         self.assertIn("Skills describe process", core.safety)
         self.assertIn("The user never selects a skill", core.skill)
         slugs = {skill.slug for skill in catalog}
-        self.assertIn("research", slugs)
+        self.assertEqual(slugs, {"search", "deep-research"})
 
     def test_parse_skill_uses_headings_not_mode_syntax(self) -> None:
         text = (
@@ -51,11 +51,22 @@ class SkillRuntimeTests(unittest.TestCase):
         self.assertIn("short description", skill.description)
         self.assertIn("asks for an example", skill.when_to_use)
 
-    def test_selector_attaches_research_for_source_questions(self) -> None:
+    def test_web_search_skills_require_ai_planner_selection(self) -> None:
         selected = self.runtime.select(
             "Please research Napoleon and evaluate sources with citations."
         )
-        self.assertEqual([skill.slug for skill in selected], ["research"])
+        self.assertEqual(selected, [])
+
+        deep = self.runtime.select(
+            "A request needing several sources.",
+            preferred_skill="deep-research",
+        )
+        self.assertEqual([skill.slug for skill in deep], ["deep-research"])
+        quick = self.runtime.select(
+            "A current factual question.",
+            preferred_skill="search",
+        )
+        self.assertEqual([skill.slug for skill in quick], ["search"])
 
     def test_selector_skips_ordinary_chat(self) -> None:
         selected = self.runtime.select("hello, how are you today?")
@@ -75,22 +86,21 @@ class SkillRuntimeTests(unittest.TestCase):
         self.assertIn("# Skill workflow", content)
         self.assertNotIn("# Active skill: Research", content)
 
-    def test_composer_includes_research_body_when_selected(self) -> None:
+    def test_composer_does_not_guess_web_skill_without_planner_result(self) -> None:
         message = compose_system_message(
             "Need a literature overview and source evaluation for climate reports.",
             runtime=self.runtime,
         )
-        self.assertIn("# Active skill: Research", message["content"])
-        self.assertIn("## Process", message["content"])
+        self.assertNotIn("# Active skill: Deep Research", message["content"])
 
     def test_research_skill_has_no_http_execution_logic(self) -> None:
-        research = self.runtime.registry.get("research")
+        research = self.runtime.registry.get("deep-research")
         self.assertIsNotNone(research)
         assert research is not None
         lowered = research.body.lower()
         for marker in _HTTP_MARKERS:
             self.assertNotIn(marker, lowered)
-        self.assertIn("belong to tools or runtime", research.body)
+        self.assertIn("untrusted external data", research.body)
 
     def test_selector_respects_top_k_and_threshold(self) -> None:
         skills = [
@@ -111,12 +121,12 @@ class SkillRuntimeTests(unittest.TestCase):
 
     def test_conversation_composer_joins_selected_skills(self) -> None:
         composer = ConversationComposer(self.runtime.core)
-        research = self.runtime.registry.get("research")
+        research = self.runtime.registry.get("deep-research")
         assert research is not None
         content = composer.build_system_content([research])
         self.assertLess(content.index("You are ZEUS"), content.index("# Safety"))
         self.assertLess(content.index("# Safety"), content.index("# Skill workflow"))
-        self.assertLess(content.index("# Skill workflow"), content.index("# Active skill: Research"))
+        self.assertLess(content.index("# Skill workflow"), content.index("# Active skill: Deep Research"))
 
 
 def _spec(slug: str, description: str, when_to_use: str) -> SkillSpec:

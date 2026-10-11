@@ -72,6 +72,9 @@ def parse_skill_markdown(text: str, path: Path) -> SkillSpec:
 
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
+        if line.startswith("name: "):
+            name = line[6:].strip().strip("\"'")
+            continue
         if line.startswith("# "):
             heading = line[2:].strip()
             if heading:
@@ -94,7 +97,7 @@ def parse_skill_markdown(text: str, path: Path) -> SkillSpec:
 
     return SkillSpec(
         name=name,
-        slug=path.stem.lower(),
+        slug=(path.parent.name if path.name == "SKILL.md" else path.stem).lower(),
         description=" ".join(lead),
         when_to_use="\n".join(when_lines),
         body=text.strip(),
@@ -120,7 +123,7 @@ class SkillLoader:
         if not catalog_dir.is_dir():
             return []
         skills: list[SkillSpec] = []
-        for path in sorted(catalog_dir.glob("*.md")):
+        for path in sorted(catalog_dir.rglob("SKILL.md")):
             skills.append(parse_skill_markdown(path.read_text(encoding="utf-8"), path))
         return skills
 
@@ -167,6 +170,10 @@ class SkillSelector:
         self._prompt_vocabulary = _distinctive_tokens(
             [tokens for _, tokens in self._skill_tokens]
         )
+
+    @property
+    def top_k(self) -> int:
+        return self._top_k
 
     def select(self, query: str) -> list[SkillSpec]:
         prompt_tokens = analyze_prompt(query, self._prompt_vocabulary)
@@ -224,6 +231,26 @@ class SkillRuntime:
             min_score=min_score,
         )
 
-    def select(self, query: str, recent: str = "") -> list[SkillSpec]:
+    def select(
+        self,
+        query: str,
+        recent: str = "",
+        preferred_skill: str | None = None,
+    ) -> list[SkillSpec]:
         combined = "\n".join(part for part in (recent, query) if part and part.strip())
-        return self.selector.select(combined)
+        selected = [
+            skill
+            for skill in self.selector.select(combined)
+            if skill.slug not in {"search", "deep-research"}
+        ]
+        if preferred_skill not in {"search", "deep-research"}:
+            return selected
+        required_skill = self.registry.get(preferred_skill)
+        if required_skill is None:
+            return selected
+        return [
+            required_skill,
+            *(skill for skill in selected if skill.slug != preferred_skill),
+        ][
+            : self.selector.top_k
+        ]

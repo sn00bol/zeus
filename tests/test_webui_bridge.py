@@ -94,6 +94,7 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
                         "conversation_id": "conversation-1",
                         "user_id": "webui-conversation-1",
                     },
+                    "tools": ["search"],
                     "messages": [{"role": "user", "content": "hello"}],
                 },
             )
@@ -105,3 +106,4 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.request.session, "session")
         self.assertEqual(router.request.platform, "webui")
         self.assertEqual(router.request.messages[0].content, "hello")
+        self.assertEqual(router.request.extra["tools"], ["search"])

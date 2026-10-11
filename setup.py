@@ -425,6 +425,7 @@ def setup_project(
             "DB_USER": existing.get("DB_USER", "zeus"),
             "DB_PASSWORD": existing.get("DB_PASSWORD") or secrets.token_urlsafe(32),
             "BRIDGE_TOKEN": existing.get("BRIDGE_TOKEN") or secrets.token_urlsafe(32),
+            "SEARXNG_SECRET": existing.get("SEARXNG_SECRET") or secrets.token_urlsafe(32),
         }
         selected = set(platform.split(","))
         if (
@@ -495,6 +496,7 @@ def setup_project(
             "DB_USER": existing.get("DB_USER", "zeus"),
             "DB_PASSWORD": existing.get("DB_PASSWORD") or secrets.token_urlsafe(32),
             "BRIDGE_TOKEN": existing.get("BRIDGE_TOKEN") or secrets.token_urlsafe(32),
+            "SEARXNG_SECRET": existing.get("SEARXNG_SECRET") or secrets.token_urlsafe(32),
         }
 
         # Platform specific settings

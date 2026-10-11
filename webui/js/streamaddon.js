@@ -1,8 +1,53 @@
 export function renderStreamDetails(container, details) {
     if (!details || (
         !details.provider && !details.model && !details.context_length
+        && !details.sources?.length
     )) return;
     container.replaceChildren();
+
+    if (Array.isArray(details.sources)) {
+        const sourceFooter = document.createElement('footer');
+        sourceFooter.className = 'source-footer';
+        const label = document.createElement('span');
+        label.className = 'source-footer-label';
+        label.textContent = 'Sources';
+        const sources = document.createElement('div');
+        sources.className = 'source-pills';
+        const seenUrls = new Set();
+        for (const source of details.sources) {
+            if (!source || typeof source.url !== 'string') continue;
+            let url;
+            try {
+                url = new URL(source.url);
+            } catch {
+                continue;
+            }
+            if (!['http:', 'https:'].includes(url.protocol)) continue;
+            const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+            if (!hostname || seenUrls.has(url.href)) continue;
+            seenUrls.add(url.href);
+
+            const pill = document.createElement('a');
+            pill.className = 'source-pill';
+            pill.href = url.href;
+            pill.target = '_blank';
+            pill.rel = 'noopener noreferrer';
+            const title = typeof source.title === 'string' && source.title.trim()
+                ? source.title.trim()
+                : hostname;
+            pill.title = title;
+            pill.setAttribute('aria-label', `Open source: ${title}`);
+            pill.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.25"></circle><path d="M1.9 8h12.2M8 1.75c1.65 1.7 2.45 3.78 2.45 6.25S9.65 12.55 8 14.25C6.35 12.55 5.55 10.47 5.55 8S6.35 3.45 8 1.75Z"></path></svg>';
+            const linkLabel = document.createElement('span');
+            linkLabel.textContent = title;
+            pill.append(linkLabel);
+            sources.append(pill);
+        }
+        if (sources.childElementCount) {
+            sourceFooter.append(label, sources);
+            container.append(sourceFooter);
+        }
+    }
 
     if (details.provider || details.model) {
         const label = document.createElement('span');

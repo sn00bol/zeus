@@ -25,3 +25,4 @@ tests/
 .backups/
 **/*.png~
 **/*.ico~
+ROADMAP.md

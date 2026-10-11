@@ -41,6 +41,28 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             }));
         }).on('error', reject);
     });
+    const post = (path, payload) => new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload);
+        const outgoing = http.request({
+            host: '127.0.0.1',
+            port,
+            path,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+            },
+        }, response => {
+            const chunks = [];
+            response.on('data', chunk => chunks.push(chunk));
+            response.on('end', () => resolve({
+                status: response.statusCode,
+                body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+            }));
+        });
+        outgoing.on('error', reject);
+        outgoing.end(body);
+    });
 
     try {
         const page = await requestRaw('/');
@@ -89,6 +111,26 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         const status = await request('/api/status');
         assert.equal(status.status, 200);
         assert.deepEqual(requests, ['/models', '/status']);
+
+        const tools = await request('/api/tools');
+        assert.equal(tools.status, 200);
+        assert.deepEqual(tools.body.tools, [{
+            name: 'search',
+            label: 'Search',
+            description: 'Search the web for current facts, recent news, quick lookups, and online comparisons',
+        }]);
+        const unknownTool = await post('/api/chat', {
+            conversationId: 'conversation-1',
+            message: 'Search for this',
+            tools: ['browser'],
+        });
+        assert.equal(unknownTool.status, 400);
+        const duplicateTool = await post('/api/chat', {
+            conversationId: 'conversation-1',
+            message: 'Search for this',
+            tools: ['search', 'search'],
+        });
+        assert.equal(duplicateTool.status, 400);
 
         const streamId = streamManager.start(
             async () => new Promise(resolve => { releaseStream = resolve; }),

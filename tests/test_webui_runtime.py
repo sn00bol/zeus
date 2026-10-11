@@ -4,8 +4,11 @@ import asyncio
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
-from router.router import Router
+from core.model import ModelContext
+from router.router import InferenceRequest, Message, Router
+from src.search import SearchResult
 from src.trace import TraceRecord, decode_trace, encode_trace
 from src.browser_loop import BrowserLoop
 from src.browser_obs import BrowserObservation, BrowserReference
@@ -158,6 +161,21 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enabled["reasoning_effort"], "medium")
         self.assertNotIn("think", enabled)
 
+    def test_webui_search_selection_is_not_forwarded_as_native_model_tools(self) -> None:
+        payload = Router._chat_payload(
+            SimpleNamespace(name="ollama"),
+            "gemma4:31b-cloud",
+            [{"role": "user", "content": "Search this."}],
+            0.7,
+            None,
+            {"tools": ["search"], "think": False},
+            stream=True,
+            think=False,
+        )
+
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("think", payload)
+
     def test_explicit_think_off_disables_template_reasoning(self) -> None:
         provider = SimpleNamespace(name="llamacpp")
         payload = Router._chat_payload(
@@ -238,7 +256,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 stream=True,
                 temperature=None,
                 max_tokens=None,
-                platform="webui",
+                platform="test",
                 extra={},
                 session=None,
             ),
@@ -314,7 +332,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 stream=True,
                 temperature=None,
                 max_tokens=None,
-                platform="webui",
+                platform="test",
                 extra={},
                 session=None,
             ),
@@ -383,7 +401,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 stream=True,
                 temperature=None,
                 max_tokens=None,
-                platform="webui",
+                platform="test",
                 extra={"think": False},
                 session=None,
             ),
@@ -392,6 +410,162 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.call[2]["json"]["reasoning_effort"], "none")
         self.assertEqual(response.context_length, 8192)
+
+
+class RouterSearchPlannerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ai_search_plan_selects_skill_and_uses_generated_query(self) -> None:
+        context = ModelContext(
+            provider_name="ollama",
+            provider=SimpleNamespace(name="ollama"),
+            model_name="model",
+            messages=[{
+                "role": "system",
+                "content": (
+                    "SearXNG search results for: cup winner\n"
+                    "unrelated.test: unrelated sports result"
+                ),
+            }],
+            search_results=[
+                SearchResult(
+                    title="Unrelated tournament schedule",
+                    url="https://unrelated.test/schedule",
+                    content="Schedule for an unrelated tournament.",
+                    engine="test",
+                ),
+                SearchResult(
+                    title="Latest cup final winner",
+                    url="https://relevant.test/final",
+                    content="The final result and winning team.",
+                    engine="test",
+                ),
+            ],
+        )
+        manager = SimpleNamespace(resolve=AsyncMock(return_value=context))
+        router = Router.__new__(Router)
+        router.model_manager = manager
+        request = InferenceRequest(
+            messages=[Message(role="user", content="Who won the latest cup?")],
+            platform="webui",
+        )
+        planner_call = AsyncMock(side_effect=[{
+            "choices": [{
+                "message": {
+                    "content": (
+                        '{"use_search":true,"query":"latest cup final winner",'
+                        '"skill":"deep-research"}'
+                    ),
+                },
+            }],
+        }, {
+            "choices": [{
+                "message": {"content": '{"relevant_ids":[2]}'},
+            }],
+        }])
+
+        with patch.object(Router, "_call_backend", new=planner_call):
+            planned_request, planned_context = await router._plan_search(
+                request,
+                context,
+                SimpleNamespace(),
+            )
+
+        self.assertIs(planned_context, context)
+        self.assertEqual(planned_request.extra["tools"], ["search"])
+        self.assertEqual(planned_request.extra["search_query"], "latest cup final winner")
+        self.assertEqual(planned_request.extra["search_skill"], "deep-research")
+        manager.resolve.assert_awaited_once()
+        planner_call.assert_awaited()
+        self.assertEqual(
+            [result.url for result in planned_context.search_results],
+            ["https://relevant.test/final"],
+        )
+        search_context = next(
+            message["content"]
+            for message in planned_context.messages
+            if message["role"] == "system"
+            and "SearXNG" in message["content"]
+        )
+        self.assertIn("https://relevant.test/final", search_context)
+        self.assertNotIn("unrelated.test", search_context)
+
+    async def test_invalid_search_screening_fails_closed_for_results_and_sources(self) -> None:
+        result = SearchResult(
+            title="Unverified match",
+            url="https://unrelated.test/page",
+            content="A weak keyword-only match.",
+            engine="test",
+        )
+        context = ModelContext(
+            provider_name="ollama",
+            provider=SimpleNamespace(name="ollama"),
+            model_name="model",
+            messages=[{
+                "role": "system",
+                "content": "SearXNG search results for: requested topic",
+            }],
+            search_results=[result],
+        )
+        router = Router.__new__(Router)
+        request = InferenceRequest(
+            messages=[Message(role="user", content="Find the exact answer.")],
+            platform="webui",
+            extra={"search_query": "exact answer"},
+        )
+        invalid_screening = AsyncMock(return_value={
+            "choices": [{
+                "message": {"content": '{"relevant_ids":[9]}'},
+            }],
+        })
+
+        with patch.object(Router, "_call_backend", new=invalid_screening):
+            screened = await router._screen_search_results(
+                request,
+                context,
+                SimpleNamespace(),
+            )
+
+        self.assertEqual(screened.search_results, [])
+        self.assertNotIn("unrelated.test", screened.messages[0]["content"])
+        self.assertIn("passed relevance screening", screened.messages[0]["content"])
+
+    async def test_ai_search_plan_can_decline_and_explicit_selection_is_respected(self) -> None:
+        context = ModelContext(
+            provider_name="ollama",
+            provider=SimpleNamespace(name="ollama"),
+            model_name="model",
+        )
+        manager = SimpleNamespace(resolve=AsyncMock(return_value=context))
+        router = Router.__new__(Router)
+        router.model_manager = manager
+        request = InferenceRequest(
+            messages=[Message(role="user", content="Hello there.")],
+            platform="webui",
+        )
+        no_search = AsyncMock(return_value={
+            "choices": [{"message": {"content": (
+                '{"use_search":false,"query":"","skill":"search"}'
+            )}}],
+        })
+
+        with patch.object(Router, "_call_backend", new=no_search):
+            returned_request, returned_context = await router._plan_search(
+                request, context, SimpleNamespace(),
+            )
+
+        self.assertIs(returned_request, request)
+        self.assertIs(returned_context, context)
+        manager.resolve.assert_not_awaited()
+
+        request.extra["tools"] = ["search"]
+        explicit_fallback = AsyncMock(side_effect=ValueError("invalid planner response"))
+        with patch.object(Router, "_call_backend", new=explicit_fallback):
+            planned_request, _ = await router._plan_search(
+                request, context, SimpleNamespace(),
+            )
+
+        self.assertEqual(planned_request.extra["tools"], ["search"])
+        self.assertEqual(planned_request.extra["search_query"], "Hello there.")
+        manager.resolve.assert_awaited_once()
 
 
 

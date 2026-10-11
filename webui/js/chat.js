@@ -19,6 +19,8 @@ const historyLoadingElement = document.getElementById('history-loading');
 const form = document.getElementById('chat-form');
 const input = document.getElementById('message-input');
 const sendButton = document.getElementById('send-button');
+const toolMenu = document.getElementById('tool-picker-menu');
+const selectedToolsElement = document.getElementById('selected-tools');
 const modelButton = document.getElementById('model-picker-button');
 const modelLabel = document.getElementById('model-picker-label');
 const modelMenu = document.getElementById('model-picker-menu');
@@ -28,6 +30,9 @@ let busy = false;
 let modelChoices = [];
 let modelPreference = null;
 let runtimeModel = null;
+let availableTools = [];
+let selectedTools = [];
+let activeToolOption = 0;
 let thinkingMode = localStorage.getItem('zeus.webui.thinking_mode') || 'auto'; // 'auto' | 'on' | 'off'
 
 function updateThinkingModeUI() {
@@ -76,7 +81,41 @@ function scrollToLatest() {
     scrollElement.scrollTop = scrollElement.scrollHeight;
 }
 
-function addMessage(role, content, { error = false, thinking: thinkingText = '' } = {}) {
+function removeLeadingSourceSection(content) {
+    const lines = String(content).replace(/\r\n?/g, '\n').split('\n');
+    let headingIndex = 0;
+    while (headingIndex < lines.length && !lines[headingIndex].trim()) headingIndex += 1;
+
+    const heading = lines[headingIndex]?.trim()
+        .replace(/^#{1,6}\s*/, '')
+        .replace(/^\*\*(.*)\*\*$/, '$1')
+        .replace(/:$/, '')
+        .trim();
+    if (!/^(sources?|references?|bibliography|nguồn(?:\s+tham\s+khảo)?)$/i.test(heading || '')) {
+        return content;
+    }
+
+    let contentIndex = headingIndex + 1;
+    while (contentIndex < lines.length) {
+        const line = lines[contentIndex].trim();
+        if (
+            !line
+            || /^(?:[-*+]\s+|\d+[.)]\s+|https?:\/\/)/i.test(line)
+            || /https?:\/\/\S+/i.test(line)
+        ) {
+            contentIndex += 1;
+            continue;
+        }
+        break;
+    }
+    return lines.slice(contentIndex).join('\n').trimStart();
+}
+
+function addMessage(
+    role,
+    content,
+    { error = false, thinking: thinkingText = '', sources = [] } = {},
+) {
     const item = document.createElement('article');
     item.className = `message ${role}${error ? ' error' : ''}`;
     const body = document.createElement('div');
@@ -84,7 +123,12 @@ function addMessage(role, content, { error = false, thinking: thinkingText = '' 
     const contentElement = document.createElement('div');
     contentElement.className = 'message-content';
     if (role === 'assistant' && !error) {
-        renderMessageContent(contentElement, content);
+        renderMessageContent(
+            contentElement,
+            Array.isArray(sources) && sources.length
+                ? removeLeadingSourceSection(content)
+                : content,
+        );
         addCodeCopyControls(contentElement);
     } else {
         contentElement.textContent = content;
@@ -109,9 +153,14 @@ function addMessage(role, content, { error = false, thinking: thinkingText = '' 
     return { item, thinking, contentElement, details };
 }
 
-function setAssistantContent(message, content) {
+function setAssistantContent(message, content, sources = []) {
     message.contentElement.className = 'message-content';
-    renderMessageContent(message.contentElement, content);
+    renderMessageContent(
+        message.contentElement,
+        Array.isArray(sources) && sources.length
+            ? removeLeadingSourceSection(content)
+            : content,
+    );
     addCodeCopyControls(message.contentElement);
     scrollToLatest();
 }
@@ -217,6 +266,112 @@ function updateSendButton() {
     sendButton.disabled = busy || !input.value.trim();
 }
 
+function getToolMention() {
+    const cursor = input.selectionStart;
+    const beforeCursor = input.value.slice(0, cursor);
+    const match = beforeCursor.match(/@([a-zA-Z0-9_-]*)$/);
+    if (!match) return null;
+    return {
+        start: cursor - match[0].length,
+        query: match[1].toLowerCase(),
+    };
+}
+
+function visibleTools() {
+    const mention = getToolMention();
+    if (!mention) return [];
+    return availableTools.filter(tool => (
+        tool.name.includes(mention.query)
+        || tool.label.toLowerCase().includes(mention.query)
+        || tool.description.toLowerCase().includes(mention.query)
+    ));
+}
+
+function closeToolMenu() {
+    toolMenu.hidden = true;
+    toolMenu.replaceChildren();
+    input.setAttribute('aria-expanded', 'false');
+    input.removeAttribute('aria-activedescendant');
+}
+
+function renderToolMenu() {
+    const tools = visibleTools();
+    if (!tools.length) {
+        closeToolMenu();
+        return;
+    }
+
+    toolMenu.replaceChildren();
+    activeToolOption = Math.min(activeToolOption, tools.length - 1);
+    for (const [index, tool] of tools.entries()) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'tool-option';
+        option.id = `tool-option-${tool.name}`;
+        option.setAttribute('role', 'option');
+        option.setAttribute('aria-selected', String(index === activeToolOption));
+        option.addEventListener('mousedown', event => event.preventDefault());
+        const label = document.createElement('span');
+        label.className = 'tool-option-label';
+        label.textContent = `@${tool.name}`;
+        const description = document.createElement('span');
+        description.className = 'tool-option-description';
+        description.textContent = tool.description;
+        option.append(label, description);
+        option.addEventListener('click', () => selectTool(tool));
+        toolMenu.append(option);
+    }
+    toolMenu.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-activedescendant', `tool-option-${tools[activeToolOption].name}`);
+}
+
+function renderSelectedTools() {
+    selectedToolsElement.replaceChildren();
+    for (const toolName of selectedTools) {
+        const tool = availableTools.find(item => item.name === toolName);
+        if (!tool) continue;
+        const chip = document.createElement('span');
+        chip.className = 'selected-tool';
+        const label = document.createElement('span');
+        label.textContent = `@${tool.label}`;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'selected-tool-remove';
+        remove.setAttribute('aria-label', `Remove ${tool.label} tool`);
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+            selectedTools = selectedTools.filter(name => name !== toolName);
+            renderSelectedTools();
+            input.focus();
+        });
+        chip.append(label, remove);
+        selectedToolsElement.append(chip);
+    }
+    const hasTools = selectedTools.length > 0;
+    selectedToolsElement.hidden = !hasTools;
+    form.classList.toggle('has-tools', hasTools);
+}
+
+function selectTool(tool) {
+    const mention = getToolMention();
+    if (!mention) return;
+    if (!selectedTools.includes(tool.name)) selectedTools.push(tool.name);
+    const cursor = input.selectionStart;
+    input.value = `${input.value.slice(0, mention.start)}${input.value.slice(cursor)}`;
+    input.setSelectionRange(mention.start, mention.start);
+    closeToolMenu();
+    renderSelectedTools();
+    resizePrompt();
+    updateSendButton();
+    input.focus();
+}
+
+async function loadTools() {
+    const result = await api('/api/tools');
+    availableTools = Array.isArray(result.tools) ? result.tools : [];
+}
+
 function resizePrompt() {
     input.style.height = 'auto';
     const multiline = input.scrollHeight > 48;
@@ -238,13 +393,13 @@ async function watchAssistantStream(streamId, response) {
             setAssistantContent(response, renderedText);
         });
     };
-    const flushRender = (finalText) => {
+    const flushRender = (finalText, sources = []) => {
         if (renderTimer) {
             cancelAnimationFrame(renderTimer);
             renderTimer = null;
         }
         if (typeof finalText === 'string') renderedText = finalText;
-        setAssistantContent(response, renderedText);
+        setAssistantContent(response, renderedText, sources);
     };
 
     try {
@@ -265,14 +420,17 @@ async function watchAssistantStream(streamId, response) {
                 } else if (type === 'done') {
                     if (data.message?.thinking) loading.setThinking(data.message.thinking);
                     loading.finish();
-                    flushRender(data.message.content);
+                    flushRender(data.message.content, data.message.sources);
                 }
             },
             streamId,
         });
         if (result.message?.thinking) loading.setThinking(result.message.thinking);
         loading.finish();
-        flushRender(result.message?.content || renderedText);
+        flushRender(
+            result.message?.content || renderedText,
+            result.message?.sources,
+        );
         if (!loading.element.isConnected) response.thinking.hidden = true;
     } catch (error) {
         if (renderTimer) cancelAnimationFrame(renderTimer);
@@ -287,9 +445,31 @@ async function watchAssistantStream(streamId, response) {
 input.addEventListener('input', () => {
     resizePrompt();
     updateSendButton();
+    activeToolOption = 0;
+    renderToolMenu();
 });
 
 input.addEventListener('keydown', event => {
+    const tools = visibleTools();
+    if (!toolMenu.hidden && tools.length) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            activeToolOption = (
+                activeToolOption + (event.key === 'ArrowDown' ? 1 : tools.length - 1)
+            ) % tools.length;
+            renderToolMenu();
+            return;
+        }
+        if (event.key === 'Escape') {
+            closeToolMenu();
+            return;
+        }
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            selectTool(tools[activeToolOption]);
+            return;
+        }
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         form.requestSubmit();
@@ -300,12 +480,16 @@ form.addEventListener('submit', async event => {
     event.preventDefault();
     const messageText = input.value.trim();
     if (!messageText || busy) return;
+    const tools = [...selectedTools];
 
     busy = true;
     updateSendButton();
     setEmptyChatLayout(false);
     addMessage('user', messageText);
     input.value = '';
+    selectedTools = [];
+    renderSelectedTools();
+    closeToolMenu();
     resizePrompt();
     const response = addMessage('assistant', '');
 
@@ -314,6 +498,7 @@ form.addEventListener('submit', async event => {
             conversationId,
             message: messageText,
             think: getThinkParam(),
+            tools,
         });
         await watchAssistantStream(streamId, response);
     } catch (error) {
@@ -372,6 +557,7 @@ document.addEventListener('click', event => {
 });
 
 Promise.all([
+    loadTools(),
     loadModels(),
     loadSessionHistory({
         api,

@@ -94,8 +94,12 @@
                             </div>
                             <div class="composer-wrap" id="composer-wrap">
                                 <form class="composer" id="chat-form">
-                                    <textarea id="message-input" rows="1" placeholder="Ask something..."
-                                        aria-label="Message"></textarea>
+                                    <div class="tool-picker-menu" id="tool-picker-menu" role="listbox"
+                                        aria-label="Available tools" hidden></div>
+                                    <div class="selected-tools" id="selected-tools" hidden></div>
+                                    <textarea id="message-input" rows="1" placeholder="Use @ to select a tool, or type your message here…" spellcheck="false"
+                                        aria-label="Message" aria-controls="tool-picker-menu"
+                                        aria-expanded="false" autocomplete="off"></textarea>
                                     <div class="composer-actions">
                                         <div class="model-picker" id="model-picker">
                                             <button class="model-picker-button" id="model-picker-button" type="button"

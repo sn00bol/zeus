@@ -14,10 +14,10 @@
   </p>
 </div>
 
-## Features
+## Features (DEMO)
 - **Literrally a chatbot** — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
 - **Analysis documents** — Support writing, spelling error checks, suggestion and basic Text Editor
-- **Searching with searXNG** — Support built in searXNG and Deep research, optimize result and speed
+- **Searching with SearXNG** — ZEUS analyzes WebUI messages and searches automatically when fresh evidence would help. Search can also be explicitly selected from the `@` menu. Sources appear as compact footer pills, and ZEUS reads SearXNG's regular HTML results page.
 - **Compare** — Using advance comparing to choose which product, GPU,... is the best
 - **Smart database** — Saving your history chat and your custom skill to make your personal AI Agents
 
@@ -29,7 +29,7 @@ python setup.py
 docker compose up --build -d
 ```
 
-The WebUI is available at `http://localhost:3000` (or the port configured by `WEBUI_PORT` in `.env`). Discord and Telegram can both run alongside it when selected in `setup.py` and configured in `.env` (`PLATFORM`).
+The WebUI is available at `http://localhost:3000` (or the port configured by `WEBUI_PORT` in `.env`), Discord and Telegram can both run alongside it when selected in `setup.py` and configured in `.env` (`PLATFORM`).
 
 For full native install, running docker, update and troubleshooting instruct, check at [setup guide](docs/SETUP.md).
 

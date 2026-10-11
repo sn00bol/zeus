@@ -190,6 +190,7 @@ def _response_payload(result: Any) -> dict[str, Any]:
         "prompt_tokens": result.prompt_tokens,
         "completion_tokens": result.completion_tokens,
         "context_length": getattr(result, "context_length", None),
+        "sources": getattr(result, "sources", []),
         "finish_reason": result.finish_reason,
     }
 

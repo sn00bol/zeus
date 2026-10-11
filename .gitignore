@@ -23,6 +23,7 @@ database/postgres/
 database/history.json
 
 # others
+ROADMAP.md
 test/
 **/*.test.js
 !tests/platform_healthcheck.test.js

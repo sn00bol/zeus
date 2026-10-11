@@ -1,8 +1,8 @@
 # Setup
 
-ZEUS runs a Node.js WebUI, a Python inference bridge, and PostgreSQL. Docker
-Compose starts the WebUI and database together. You do not need to run
-`python app.py` separately when using Compose.
+ZEUS runs a Node.js WebUI, a Python inference bridge, and PostgreSQL. SearXNG
+runs in its own container in the same Docker Compose project. You do not need
+to run `python app.py` separately when using Compose.
 
 ## Requirements
 
@@ -39,6 +39,15 @@ Compose starts the WebUI and database together. You do not need to run
 3. Edit `.env`:
    - Set `DB_PASSWORD` to a long, random password. Compose will refuse to start
      PostgreSQL if it is empty.
+   - Set `SEARXNG_SECRET` to a long, random value. `python setup.py` generates
+     this secret along with the database password and bridge token.
+   - `SEARXNG_URL` defaults to `http://searxng:8080` for ZEUS-to-SearXNG
+     container traffic. If you are upgrading an existing `.env` from the
+     previous separate Compose setup, change its old `host.docker.internal`
+     URL to `http://searxng:8080`. Set `SEARXNG_URL` to a different address
+     only when using a different SearXNG instance. `SEARXNG_PORT` defaults to
+     `8888` for opening SearXNG from the host; change it only to use a
+     different host port.
    - Choose `ZEUS_PROVIDER` and optionally `ZEUS_MODEL`.
    - Set `ZEUS_LLM_HOST` to the address reachable **from the container**. For a
      provider running on the same machine, the default
@@ -58,19 +67,41 @@ Compose starts the WebUI and database together. You do not need to run
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
 
-4. Build and start ZEUS:
+4. Build and start the stack:
 
    ```bash
    docker compose up --build -d
    ```
 
+   If upgrading from the previous separate SearXNG Compose setup, stop its
+   existing container first so it releases port `8888`:
+
+   ```bash
+   docker ps --filter publish=8888
+   docker stop <old-searxng-container>
+   ```
+
+   The old container is commonly named `searxng-searxng-1`. Only stop the
+   SearXNG container shown by the first command, then retry `docker compose up`.
+
 5. Open `http://localhost:3000`. If you changed `WEBUI_PORT`, open that port
    instead.
 
-Compose publishes the WebUI on the host's loopback interface, starts
-PostgreSQL before ZEUS, and waits for PostgreSQL's healthcheck. The WebUI
-inference bridge is started by the Node WebUI process inside the ZEUS
-container.
+The root Compose project runs ZEUS, PostgreSQL, and SearXNG as separate
+containers on its Compose network. SearXNG's normal HTML search page is
+published on the host loopback at `http://localhost:8888` and is not exposed
+to the local network. ZEUS reaches SearXNG over the internal Compose network
+at `http://searxng:8080`. Its settings are in
+[settings.yml](../searxng/settings.yml).
+ZEUS analyzes WebUI messages with the selected model and searches when fresh
+web evidence would help; no search keywords or `@` selection are required.
+You can still type `@` and select **Search** to force a lookup. ZEUS fetches the
+regular HTML search page, not SearXNG's JSON API or the source engines directly.
+ZEUS uses its selected model to screen SearXNG results against the full user
+request before adding them to the answer context. Only results that pass this
+relevance check appear as compact source pills below the answer; if screening
+fails, unrelated result links are withheld. SearXNG aggregates results from its
+configured engines.
 
 ## Check startup and logs
 
@@ -78,6 +109,7 @@ container.
 docker compose ps
 docker compose logs -f zeus
 docker compose logs -f postgres
+docker compose logs -f searxng
 ```
 
 The ZEUS container healthcheck tests the WebUI endpoint. To stop the services:
@@ -85,6 +117,16 @@ The ZEUS container healthcheck tests the WebUI endpoint. To stop the services:
 ```bash
 docker compose down
 ```
+
+To stop only SearXNG while leaving ZEUS and PostgreSQL running:
+
+```bash
+docker compose stop searxng
+```
+
+The ZEUS and SearXNG services are separate containers. `docker compose down`
+stops and removes the containers for the whole stack; it does not remove the
+SearXNG image or the SearXNG settings files.
 
 PostgreSQL data is stored in `database/postgres` and remains when containers
 are stopped or removed. Back up this directory before deleting or replacing
@@ -97,6 +139,14 @@ Pull the latest source, then rebuild and recreate the containers:
 ```bash
 git pull
 docker compose up --build -d
+```
+
+SearXNG is updated independently from ZEUS while remaining part of the same
+Compose project. To update its image, run:
+
+```bash
+docker compose pull searxng
+docker compose up -d searxng
 ```
 
 ## Optional: configure interactively

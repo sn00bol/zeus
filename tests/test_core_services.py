@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
+import httpx
+
 from core.model import ModelContext, ModelManager
 from core.memory import MemoryStore
 from core.session import Session, SessionStore
@@ -15,6 +17,7 @@ from core.session_manager import SessionManager
 from router.router import Router
 from src.provider import LlamaCppProvider, LMStudioProvider, ModelInfo, OllamaProvider
 from src.provider.base import ModelLimits
+from src.search import SearchResult
 from src import discord_bridge
 
 
@@ -92,6 +95,23 @@ class FakeMemoryDatabase:
         return "DELETE 2"
 
 
+class FakeSearchClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    async def search(self, query: str, *, limit: int = 6) -> list[SearchResult]:
+        self.calls.append((query, limit))
+        return [
+            SearchResult(
+                title="Official research",
+                url="https://example.test/research",
+                content="A verified search snippet.",
+                engine="test",
+                published_date="2026-07-20",
+            )
+        ]
+
+
 class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_status_reports_configured_provider_and_loaded_model(self) -> None:
         provider = FakeProvider()
@@ -122,6 +142,141 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(context.context_length, 65536)
         self.assertEqual(status["context_length"], 65536)
+
+    async def test_research_request_searches_and_adds_bounded_source_context(self) -> None:
+        search = FakeSearchClient()
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=search,
+        )
+        question = "Please research how SearXNG returns JSON results."
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[SimpleNamespace(role="user", content=question)],
+            extra={"tools": ["search"], "search_skill": "deep-research"},
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        context = await manager.resolve(request)
+
+        self.assertEqual(search.calls, [(question, 12)])
+        research_message = next(
+            message
+            for message in context.messages
+            if "SearXNG search results" in message["content"]
+        )
+        self.assertIn("https://example.test/research", research_message["content"])
+        self.assertIn("Published: 2026-07-20", research_message["content"])
+        self.assertIn("Current date:", research_message["content"])
+        self.assertIn("Pretrained knowledge may be outdated", research_message["content"])
+        self.assertIn("untrusted external data", research_message["content"])
+        self.assertIn("Start with the answer itself", research_message["content"])
+        self.assertIn("clickable source links in the answer footer", research_message["content"])
+        self.assertIn("# Active skill: Deep Research", context.messages[0]["content"])
+
+    async def test_search_failure_is_disclosed_without_blocking_inference(self) -> None:
+        class OfflineSearchClient:
+            async def search(self, query: str, *, limit: int = 6) -> list[SearchResult]:
+                raise httpx.ConnectError("offline")
+
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=OfflineSearchClient(),
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[
+                SimpleNamespace(role="user", content="Research current SearXNG features.")
+            ],
+            extra={"tools": ["search"]},
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        context = await manager.resolve(request)
+
+        search_message = next(
+            message
+            for message in context.messages
+            if "Automatic web search could not be completed" in message["content"]
+        )
+        self.assertIn("do not invent citations", search_message["content"])
+
+    async def test_follow_up_does_not_repeat_search_for_an_older_research_prompt(self) -> None:
+        search = FakeSearchClient()
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=search,
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[
+                SimpleNamespace(role="user", content="Research SearXNG JSON results."),
+                SimpleNamespace(role="assistant", content="Here is a sourced overview."),
+                SimpleNamespace(role="user", content="Can you clarify that last point?"),
+            ],
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        await manager.resolve(request)
+
+        self.assertEqual(search.calls, [])
+
+    async def test_research_prompt_does_not_search_without_explicit_tool_selection(self) -> None:
+        search = FakeSearchClient()
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=search,
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[
+                SimpleNamespace(role="user", content="Please research current SearXNG features.")
+            ],
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        context = await manager.resolve(request)
+
+        self.assertEqual(search.calls, [])
+        self.assertFalse(any(
+            "SearXNG search results" in message["content"]
+            for message in context.messages
+        ))
+
+    async def test_quick_search_includes_enough_results_to_reach_relevant_sources(self) -> None:
+        search = FakeSearchClient()
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=search,
+        )
+        question = (
+            "Bạn có thể tìm kiếm thông tin về World Cup 2026 và ai thắng đi"
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[SimpleNamespace(role="user", content=question)],
+            extra={"tools": ["search"]},
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        await manager.resolve(request)
+
+        self.assertEqual(search.calls, [(question, 12)])
 
     async def test_selected_model_uses_its_own_context_window(self) -> None:
         class DifferentContextProvider(FakeProvider):

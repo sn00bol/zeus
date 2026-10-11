@@ -30,11 +30,19 @@ try:
 except ImportError:
     httpx = None  # type: ignore[assignment]
 
-from core.model import ModelContext, ModelManager
+from core.model import ModelContext, ModelManager, format_search_context
 from core.memory import MemoryStore
 from core.session import Session
 from core.session_manager import SessionManager
 from src.provider import BaseProvider
+from src.search import (
+    SEARCH_INTENT_PROMPT,
+    SEARCH_RELEVANCE_PROMPT,
+    SearchDecision,
+    SearchResult,
+    parse_search_decision,
+    parse_search_relevance,
+)
 
 from router.broker import EventBroker, get_event_broker
 from router.dispatcher import (
@@ -113,6 +121,7 @@ class InferenceResponse:
     thinking: str = ""                  # model reasoning, when enabled
     raw: dict[str, Any] = field(default_factory=dict)  # full backend response
     context_length: int | None = None
+    sources: list[dict[str, str]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +164,212 @@ class Router:
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
             )
         return self._http_client
+
+    @staticmethod
+    def _request_with_extra(
+        request: InferenceRequest,
+        extra: dict[str, Any],
+        *,
+        provider_name: str | None = None,
+        model: str | None = None,
+    ) -> InferenceRequest:
+        return InferenceRequest(
+            messages=getattr(request, "messages", []),
+            model=model if model is not None else getattr(request, "model", None),
+            provider_name=(
+                provider_name
+                if provider_name is not None
+                else getattr(request, "provider_name", None)
+            ),
+            stream=getattr(request, "stream", False),
+            temperature=getattr(request, "temperature", None),
+            max_tokens=getattr(request, "max_tokens", None),
+            platform=getattr(request, "platform", "unknown"),
+            extra=extra,
+            session=getattr(request, "session", None),
+        )
+
+    async def _plan_search(
+        self,
+        request: InferenceRequest,
+        context: ModelContext,
+        client: Any,
+    ) -> tuple[InferenceRequest, ModelContext]:
+        extra = dict(request.extra)
+        explicit_search = (
+            isinstance(extra.get("tools"), list) and "search" in extra["tools"]
+        )
+        if getattr(request, "platform", "unknown") != "webui" and not explicit_search:
+            return request, context
+        messages = [
+            {"role": message.role, "content": message.content}
+            for message in request.messages
+            if message.role in {"user", "assistant"}
+        ][-6:]
+        user_messages = [message for message in messages if message["role"] == "user"]
+        if not user_messages:
+            return request, context
+        latest_question = user_messages[-1]["content"]
+        planner_input = json.dumps(
+            {
+                "search_selected_by_user": explicit_search,
+                "conversation": [
+                    {
+                        "role": message["role"],
+                        "content": message["content"][-4000:],
+                    }
+                    for message in messages
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        decision = SearchDecision(
+            use_search=explicit_search,
+            query=latest_question,
+            skill="search",
+        )
+        try:
+            planner_response = await self._call_backend(
+                provider=context.provider,
+                model_id=context.model_name,
+                messages=[
+                    {"role": "system", "content": SEARCH_INTENT_PROMPT},
+                    {"role": "user", "content": planner_input},
+                ],
+                temperature=0,
+                max_tokens=160,
+                stream=False,
+                extra={},
+                api_token=context.api_token,
+                client=client,
+                think=False,
+            )
+            choices = planner_response.get("choices")
+            planner_text = ""
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    planner_text = message["content"]
+            decision = parse_search_decision(
+                planner_text,
+                fallback_query=latest_question,
+                force_search=explicit_search,
+            )
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("AI web-search planning failed (%s).", type(exc).__name__)
+
+        if not decision.use_search:
+            return request, context
+
+        selected_tools = extra.get("tools")
+        existing_tools = (
+            [tool for tool in selected_tools if isinstance(tool, str)]
+            if isinstance(selected_tools, list)
+            else []
+        )
+        extra["tools"] = list(dict.fromkeys([*existing_tools, "search"]))
+        extra["search_query"] = decision.query or latest_question
+        extra["search_skill"] = decision.skill
+        planned_request = self._request_with_extra(
+            request,
+            extra,
+            provider_name=context.provider_name,
+            model=context.model_name,
+        )
+        context = await self.model_manager.resolve(planned_request)
+        return planned_request, await self._screen_search_results(
+            planned_request,
+            context,
+            client,
+        )
+
+    async def _screen_search_results(
+        self,
+        request: InferenceRequest,
+        context: ModelContext,
+        client: Any,
+    ) -> ModelContext:
+        results = context.search_results
+        if not results:
+            return context
+
+        conversation = [
+            {"role": message.role, "content": message.content[-4000:]}
+            for message in request.messages[-6:]
+            if message.role in {"user", "assistant"}
+        ]
+        user_messages = [
+            message for message in conversation if message["role"] == "user"
+        ]
+        if not user_messages:
+            return context
+
+        candidates = [
+            {
+                "id": index,
+                "title": result.title,
+                "snippet": result.content,
+                "published_date": result.published_date,
+            }
+            for index, result in enumerate(results, start=1)
+        ]
+        filtered_results: list[SearchResult] = []
+        try:
+            screening_response = await self._call_backend(
+                provider=context.provider,
+                model_id=context.model_name,
+                messages=[
+                    {"role": "system", "content": SEARCH_RELEVANCE_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "conversation": conversation,
+                                "search_results": candidates,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                temperature=0,
+                max_tokens=120,
+                stream=False,
+                extra={},
+                api_token=context.api_token,
+                client=client,
+                think=False,
+            )
+            choices = screening_response.get("choices")
+            screening_text = ""
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message")
+                if isinstance(message, dict) and isinstance(message.get("content"), str):
+                    screening_text = message["content"]
+            relevant_ids = parse_search_relevance(
+                screening_text,
+                result_count=len(results),
+            )
+            if relevant_ids is None:
+                log.warning("AI web-search relevance screening returned invalid output.")
+            else:
+                filtered_results = [results[result_id - 1] for result_id in relevant_ids]
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("AI web-search relevance screening failed (%s).", type(exc).__name__)
+
+        context.search_results = filtered_results
+        search_query = request.extra.get("search_query")
+        if not isinstance(search_query, str) or not search_query.strip():
+            search_query = user_messages[-1]["content"]
+        for message in context.messages:
+            if (
+                message.get("role") == "system"
+                and isinstance(message.get("content"), str)
+                and message["content"].startswith("SearXNG search results for:")
+            ):
+                message["content"] = format_search_context(search_query, filtered_results)
+                break
+        return context
 
     async def shutdown(self) -> None:
         """Close the shared HTTP client and stop background tasks."""
@@ -208,8 +423,15 @@ class Router:
         )
 
         try:
-            context = await self.model_manager.resolve(request)
+            planning_extra = dict(req_extra)
+            planning_extra.pop("tools", None)
+            planning_extra.pop("search_query", None)
+            planning_extra.pop("search_skill", None)
+            planning_request = self._request_with_extra(request, planning_extra)
+            context = await self.model_manager.resolve(planning_request)
             client = await self._get_client()
+            request, context = await self._plan_search(request, context, client)
+            req_extra = request.extra
 
             # Analyze complexity and decide provider candidates
             decision = await self.dispatcher.dispatch(
@@ -234,6 +456,11 @@ class Router:
                         session=getattr(request, "session", None),
                     )
                     active_context = await self.model_manager.resolve(alt_req)
+                    active_context = await self._screen_search_results(
+                        alt_req,
+                        active_context,
+                        client,
+                    )
 
                 explicit_think = req_extra.get("think")
                 if explicit_think is True or explicit_think in ("true", "True", "1", "on"):
@@ -266,6 +493,10 @@ class Router:
                 raw_response, effective_provider, final_context.model_name
             )
             response.context_length = final_context.context_length
+            response.sources = [
+                {"url": result.url, "title": result.title}
+                for result in getattr(final_context, "search_results", [])
+            ]
             await self._record_response(request, final_context, response)
 
             latency = round((time.perf_counter() - start_time) * 1000.0, 2)
@@ -329,11 +560,18 @@ class Router:
         )
 
         try:
-            context = await self.model_manager.resolve(request)
+            planning_extra = dict(req_extra)
+            planning_extra.pop("tools", None)
+            planning_extra.pop("search_query", None)
+            planning_extra.pop("search_skill", None)
+            planning_request = self._request_with_extra(request, planning_extra)
+            context = await self.model_manager.resolve(planning_request)
+            client = await self._get_client()
+            request, context = await self._plan_search(request, context, client)
+            req_extra = request.extra
             if explicit_think is None and not enable_thinking:
                 if should_enable_thinking(analyze_task_complexity(req_messages), model_name=context.model_name):
                     enable_thinking = True
-            client = await self._get_client()
             content, thinking, usage, finish_reason, actual_model = await self._stream_backend(
                 provider=context.provider,
                 model_id=context.model_name,
@@ -357,6 +595,10 @@ class Router:
                 thinking=thinking,
                 raw={"stream": True},
                 context_length=context.context_length,
+                sources=[
+                    {"url": result.url, "title": result.title}
+                    for result in getattr(context, "search_results", [])
+                ],
             )
             await self._record_response(request, context, response)
 
@@ -449,6 +691,9 @@ class Router:
             payload["max_tokens"] = max_tokens
         explicit_think = "think" in extra
         payload.pop("think", None)
+        payload.pop("tools", None)
+        payload.pop("search_query", None)
+        payload.pop("search_skill", None)
         if provider.name == "ollama":
             payload["reasoning_effort"] = "medium" if think else "none"
         elif think or explicit_think:

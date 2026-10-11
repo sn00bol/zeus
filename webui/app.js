@@ -13,6 +13,13 @@ const { StreamManager } = require('./streamManager');
 
 const PLATFORM = 'webui';
 const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64 MB
+const AVAILABLE_TOOLS = Object.freeze([
+    {
+        name: 'search',
+        label: 'Search',
+        description: 'Search the web for current facts, recent news, quick lookups, and online comparisons',
+    },
+]);
 
 function modelScope(conversationId) {
     return `webui:conversation:${conversationId}`;
@@ -202,6 +209,10 @@ function createWebUiServer({
                 });
                 return;
             }
+            if (request.method === 'GET' && url.pathname === '/api/tools') {
+                sendJson(response, 200, { tools: AVAILABLE_TOOLS });
+                return;
+            }
             if (request.method === 'GET' && url.pathname === '/api/models') {
                 const conversationId = validateConversationId(url.searchParams.get('conversationId'));
                 const [discovery, runtime, preference] = await Promise.all([
@@ -355,6 +366,14 @@ function createWebUiServer({
                     throw new HttpError(400, 'message must not be empty.');
                 }
                 const message = body.message.trim();
+                const selectedTools = body.tools === undefined ? [] : body.tools;
+                if (!Array.isArray(selectedTools)
+                    || selectedTools.length > AVAILABLE_TOOLS.length
+                    || new Set(selectedTools).size !== selectedTools.length
+                    || selectedTools.some(tool => typeof tool !== 'string'
+                        || !AVAILABLE_TOOLS.some(available => available.name === tool))) {
+                    throw new HttpError(400, 'tools must contain only available tool names.');
+                }
 
                 const userId = `webui-${conversationId}`;
                 await db.appendMessage({
@@ -384,6 +403,7 @@ function createWebUiServer({
                             model: preference?.model,
                             platform: PLATFORM,
                             think: body.think,
+                            tools: selectedTools,
                             session: {
                                 platform: PLATFORM,
                                 conversation_id: conversationId,
@@ -408,6 +428,7 @@ function createWebUiServer({
                         thinking: String(result.thinking || ''),
                         provider: result.provider,
                         model: result.model,
+                        sources: Array.isArray(result.sources) ? result.sources : [],
                         user_id: userId,
                         usage: {
                             prompt_tokens: Number(result.prompt_tokens) || 0,
@@ -423,6 +444,7 @@ function createWebUiServer({
                         prompt_tokens: assistantMessage.usage.prompt_tokens,
                         completion_tokens: assistantMessage.usage.completion_tokens,
                         context_length: assistantMessage.usage.context_length,
+                        sources: assistantMessage.sources,
                     });
                     publish('ui_control', { state: 'complete' });
                     publish('done', { message: assistantMessage });

@@ -46,7 +46,10 @@ export async function loadSessionHistory({
         messagesElement.replaceChildren();
         for (const message of messages) {
             if (message.role !== 'user' && message.role !== 'assistant') continue;
-            const rendered = addMessage(message.role, message.content, { thinking: message.thinking });
+            const rendered = addMessage(message.role, message.content, {
+                thinking: message.thinking,
+                sources: Array.isArray(message.sources) ? message.sources : [],
+            });
             if (message.role === 'assistant' && message.usage) {
                 renderStreamDetails(rendered.details, {
                     prompt_tokens: Number(message.usage.prompt_tokens),
@@ -54,6 +57,7 @@ export async function loadSessionHistory({
                     context_length: Number(message.usage.context_length),
                     provider: message.provider,
                     model: message.model,
+                    sources: Array.isArray(message.sources) ? message.sources : [],
                 });
             }
         }
