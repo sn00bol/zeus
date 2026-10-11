@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -199,8 +200,6 @@ class Router:
         explicit_search = (
             isinstance(extra.get("tools"), list) and "search" in extra["tools"]
         )
-        if getattr(request, "platform", "unknown") != "webui" and not explicit_search:
-            return request, context
         messages = [
             {"role": message.role, "content": message.content}
             for message in request.messages
@@ -210,6 +209,19 @@ class Router:
         if not user_messages:
             return request, context
         latest_question = user_messages[-1]["content"]
+        search_command = re.match(
+            r"^\s*@search(?:\s+|$)",
+            latest_question,
+            re.IGNORECASE,
+        )
+        if search_command:
+            explicit_search = True
+            search_question = (
+                latest_question[search_command.end():].strip()
+                or latest_question.strip()
+            )
+        else:
+            search_question = latest_question
         planner_input = json.dumps(
             {
                 "search_selected_by_user": explicit_search,
@@ -226,7 +238,7 @@ class Router:
 
         decision = SearchDecision(
             use_search=explicit_search,
-            query=latest_question,
+            query=search_question,
             skill="search",
         )
         try:
@@ -253,7 +265,7 @@ class Router:
                     planner_text = message["content"]
             decision = parse_search_decision(
                 planner_text,
-                fallback_query=latest_question,
+                fallback_query=search_question,
                 force_search=explicit_search,
             )
         except (httpx.HTTPError, ValueError) as exc:
@@ -269,7 +281,7 @@ class Router:
             else []
         )
         extra["tools"] = list(dict.fromkeys([*existing_tools, "search"]))
-        extra["search_query"] = decision.query or latest_question
+        extra["search_query"] = decision.query or search_question
         extra["search_skill"] = decision.skill
         planned_request = self._request_with_extra(
             request,

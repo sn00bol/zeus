@@ -23,6 +23,10 @@ class SearXNGSearchTests(unittest.IsolatedAsyncioTestCase):
             SEARCH_INTENT_PROMPT,
         )
         self.assertIn("Do not search for greetings or conversation", SEARCH_INTENT_PROMPT)
+        self.assertIn("breaking, or future events", SEARCH_INTENT_PROMPT)
+        self.assertIn("evidence, proof, citations, fact-checks", SEARCH_INTENT_PROMPT)
+        self.assertIn("official documentation, API behavior, changelogs", SEARCH_INTENT_PROMPT)
+        self.assertIn("repository files, code, or examples", SEARCH_INTENT_PROMPT)
 
     async def test_search_uses_planned_query_and_filters_invalid_results(self) -> None:
         captured: list[httpx.Request] = []

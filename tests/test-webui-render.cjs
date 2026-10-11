@@ -8,6 +8,8 @@ class FakeElement {
         this.tagName = tagName;
         this.children = [];
         this.attributes = {};
+        this.listeners = {};
+        this.dataset = {};
     }
 
     append(...children) {
@@ -20,6 +22,14 @@ class FakeElement {
 
     setAttribute(name, value) {
         this.attributes[name] = value;
+    }
+
+    addEventListener(name, callback) {
+        this.listeners[name] = callback;
+    }
+
+    remove() {
+        this.removed = true;
     }
 
     get childElementCount() {
@@ -67,10 +77,22 @@ test('search sources render as footer links, including multiple URLs from one ho
         'Open source: First article',
         'Open source: Second article',
     ]);
-    assert.deepEqual(links.map(link => link.children[0].textContent), [
+    assert.deepEqual(links.map(link => link.children[0].src), [
+        'https://www.google.com/s2/favicons?domain=example.test&sz=32',
+        'https://www.google.com/s2/favicons?domain=example.test&sz=32',
+    ]);
+    assert.deepEqual(links.map(link => link.children[0].loading), ['eager', 'eager']);
+    assert.deepEqual(links.map(link => link.children[0].fetchPriority), ['low', 'low']);
+    assert.deepEqual(links.map(link => link.children[1].textContent), [
         'First article',
         'Second article',
     ]);
+    assert.match(links[0].innerHTML, /<svg/);
+    links[0].children[0].listeners.load();
+    assert.equal(links[0].dataset.hasFavicon, 'true');
+    links[0].children[0].listeners.error();
+    assert.equal(links[0].children[0].removed, true);
+    assert.equal(links[0].dataset.hasFavicon, 'false');
     const answer = removeInlineSourceCitations(
         'The report compares several outlets【3】【4】【9】 (VnExpress, Saostar, Lao Động). [1] Other context stays.',
         [

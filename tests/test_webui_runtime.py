@@ -351,6 +351,9 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         router = Router(model_manager=FakeModelManager())
         client = FakeClient()
         router._get_client = lambda: _async_value(client)
+        router._plan_search = AsyncMock(
+            side_effect=lambda request, context, client: (request, context),
+        )
         deltas: list[str] = []
         thoughts: list[str] = []
         result = await router.route_stream(
@@ -420,6 +423,9 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         router = Router(model_manager=FakeModelManager())
         client = FakeClient()
         router._get_client = lambda: _async_value(client)
+        router._plan_search = AsyncMock(
+            side_effect=lambda request, context, client: (request, context),
+        )
         deltas = []
 
         response = await router.route_stream(
@@ -442,6 +448,77 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RouterSearchPlannerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_at_search_command_forces_search_and_removes_marker_from_query(self) -> None:
+        context = ModelContext(
+            provider_name="ollama",
+            provider=SimpleNamespace(name="ollama"),
+            model_name="model",
+        )
+        manager = SimpleNamespace(resolve=AsyncMock(return_value=context))
+        router = Router.__new__(Router)
+        router.model_manager = manager
+        request = InferenceRequest(
+            messages=[Message(role="user", content="@search latest release notes")],
+            platform="discord",
+        )
+        planner_call = AsyncMock(return_value={
+            "choices": [{
+                "message": {
+                    "content": (
+                        '{"use_search":false,"query":"","skill":"search"}'
+                    ),
+                },
+            }],
+        })
+
+        with patch.object(Router, "_call_backend", new=planner_call):
+            planned_request, _ = await router._plan_search(
+                request,
+                context,
+                SimpleNamespace(),
+            )
+
+        self.assertEqual(planned_request.extra["tools"], ["search"])
+        self.assertEqual(planned_request.extra["search_query"], "latest release notes")
+        manager.resolve.assert_awaited_once()
+
+    async def test_ai_search_planner_runs_automatically_outside_webui(self) -> None:
+        context = ModelContext(
+            provider_name="ollama",
+            provider=SimpleNamespace(name="ollama"),
+            model_name="model",
+        )
+        manager = SimpleNamespace(resolve=AsyncMock(return_value=context))
+        router = Router.__new__(Router)
+        router.model_manager = manager
+        request = InferenceRequest(
+            messages=[Message(role="user", content="What happened in the latest release?")],
+            platform="discord",
+        )
+        planner_call = AsyncMock(return_value={
+            "choices": [{
+                "message": {
+                    "content": (
+                        '{"use_search":true,"query":"latest release notes",'
+                        '"skill":"search"}'
+                    ),
+                },
+            }],
+        })
+
+        with patch.object(Router, "_call_backend", new=planner_call):
+            planned_request, planned_context = await router._plan_search(
+                request,
+                context,
+                SimpleNamespace(),
+            )
+
+        self.assertIs(planned_context, context)
+        self.assertEqual(planned_request.extra["tools"], ["search"])
+        self.assertEqual(planned_request.extra["search_query"], "latest release notes")
+        manager.resolve.assert_awaited_once()
+        planner_call.assert_awaited_once()
+
     async def test_ai_search_plan_selects_skill_and_uses_generated_query(self) -> None:
         context = ModelContext(
             provider_name="ollama",

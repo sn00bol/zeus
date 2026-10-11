@@ -89,6 +89,23 @@ export function renderStreamDetails(container, details) {
             pill.title = title;
             pill.setAttribute('aria-label', `Open source: ${title}`);
             pill.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.25"></circle><path d="M1.9 8h12.2M8 1.75c1.65 1.7 2.45 3.78 2.45 6.25S9.65 12.55 8 14.25C6.35 12.55 5.55 10.47 5.55 8S6.35 3.45 8 1.75Z"></path></svg>';
+            const icon = document.createElement('img');
+            icon.className = 'source-pill-icon';
+            icon.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`;
+            icon.alt = '';
+            icon.loading = 'eager';
+            icon.fetchPriority = 'low';
+            icon.decoding = 'async';
+            icon.referrerPolicy = 'no-referrer';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.addEventListener('load', () => {
+                pill.dataset.hasFavicon = 'true';
+            });
+            icon.addEventListener('error', () => {
+                pill.dataset.hasFavicon = 'false';
+                icon.remove();
+            });
+            pill.append(icon);
             const linkLabel = document.createElement('span');
             linkLabel.textContent = title;
             pill.append(linkLabel);

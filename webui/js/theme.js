@@ -196,6 +196,8 @@ const themeStyles = String.raw`
         .source-pill:hover { border-color: #fb923c55; color: #fed7aa; background: #fb923c0c; }
         .source-pill:focus-visible { outline: 2px solid #fb923c; outline-offset: 2px; }
         .source-pill svg { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.25; }
+        .source-pill[data-has-favicon="true"] svg { display: none; }
+        .source-pill-icon { width: 14px; height: 14px; flex: none; object-fit: contain; border-radius: 50%; }
         .source-pill span { overflow: hidden; text-overflow: ellipsis; }
         .message.error .message-content { color: #fda4af; }
         .loading-state { display: grid; gap: 8px; min-height: 26px; color: #aeb5c3; font-size: 13px; }
