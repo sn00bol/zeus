@@ -22,13 +22,15 @@ export function getSessionId() {
 }
 
 export function startNewSession() {
-    localStorage.setItem(sessionKey, createSessionId());
-    window.location.reload();
+    const id = createSessionId();
+    localStorage.setItem(sessionKey, id);
+    window.dispatchEvent(new CustomEvent('zeus:session-change', { detail: id }));
+    return id;
 }
 
 export function selectSession(id) {
     localStorage.setItem(sessionKey, id);
-    window.location.reload();
+    window.dispatchEvent(new CustomEvent('zeus:session-change', { detail: id }));
 }
 
 export async function loadSessionHistory({
@@ -40,33 +42,38 @@ export async function loadSessionHistory({
     addMessage,
     renderStreamDetails,
     scrollToLatest,
+    messageContainer = messagesElement,
 }) {
     try {
         const { messages } = await api(`/api/history?conversationId=${encodeURIComponent(sessionId)}`);
-        messagesElement.replaceChildren();
+        messageContainer.replaceChildren();
         for (const message of messages) {
             if (message.role !== 'user' && message.role !== 'assistant') continue;
             const rendered = addMessage(message.role, message.content, {
                 thinking: message.thinking,
                 sources: Array.isArray(message.sources) ? message.sources : [],
-            });
-            if (message.role === 'assistant' && message.usage) {
+            }, messageContainer);
+            if (message.role === 'assistant') {
                 renderStreamDetails(rendered.details, {
-                    prompt_tokens: Number(message.usage.prompt_tokens),
-                    completion_tokens: Number(message.usage.completion_tokens),
-                    context_length: Number(message.usage.context_length),
+                    prompt_tokens: Number(message.usage?.prompt_tokens),
+                    completion_tokens: Number(message.usage?.completion_tokens),
+                    context_length: Number(message.usage?.context_length),
                     provider: message.provider,
                     model: message.model,
                     sources: Array.isArray(message.sources) ? message.sources : [],
                 });
             }
         }
-        welcomeElement.hidden = messagesElement.childElementCount > 0;
-        loadingElement.hidden = true;
-        scrollToLatest();
-        return messagesElement.childElementCount === 0;
+        if (messageContainer.isConnected) {
+            welcomeElement.hidden = messageContainer.childElementCount > 0;
+            loadingElement.hidden = true;
+            scrollToLatest();
+        }
+        return messageContainer.childElementCount === 0;
     } catch (error) {
-        loadingElement.textContent = 'Could not load conversation history.';
+        if (messageContainer.isConnected) {
+            loadingElement.textContent = 'Could not load conversation history.';
+        }
         throw error;
     }
 }

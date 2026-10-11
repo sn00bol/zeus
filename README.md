@@ -17,8 +17,7 @@
 ## Features (DEMO)
 - **Literrally a chatbot** — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
 - **Analysis documents** — Support writing, spelling error checks, suggestion and basic Text Editor
-- **Searching with SearXNG** — ZEUS analyzes WebUI messages and searches automatically when fresh evidence would help. Search can also be explicitly selected from the `@` menu. Sources appear as compact footer pills, and ZEUS reads SearXNG's regular HTML results page.
-- **Compare** — Using advance comparing to choose which product, GPU,... is the best
+- **Searching with SearXNG** — Support built in searXNG and Deep research, optimize result and speed
 - **Smart database** — Saving your history chat and your custom skill to make your personal AI Agents
 
 ## Quick start

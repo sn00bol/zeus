@@ -36,7 +36,7 @@ test('search sources render as footer links, including multiple URLs from one ho
         'utf8',
     );
     const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-    const { renderStreamDetails } = await import(moduleUrl);
+    const { renderStreamDetails, removeInlineSourceCitations } = await import(moduleUrl);
     const container = new FakeElement('div');
 
     renderStreamDetails(container, {
@@ -58,8 +58,50 @@ test('search sources render as footer links, including multiple URLs from one ho
         'https://example.test/first',
         'https://example.test/second',
     ]);
+    assert.deepEqual(links.map(link => link.target), ['_blank', '_blank']);
+    assert.deepEqual(links.map(link => link.rel), [
+        'noopener noreferrer',
+        'noopener noreferrer',
+    ]);
+    assert.deepEqual(links.map(link => link.attributes['aria-label']), [
+        'Open source: First article',
+        'Open source: Second article',
+    ]);
     assert.deepEqual(links.map(link => link.children[0].textContent), [
         'First article',
         'Second article',
     ]);
+    const answer = removeInlineSourceCitations(
+        'The report compares several outlets【3】【4】【9】 (VnExpress, Saostar, Lao Động). [1] Other context stays.',
+        [
+            { url: 'https://vnexpress.net/article' },
+            { url: 'https://saostar.vn/article' },
+            { url: 'https://laodong.vn/article' },
+        ],
+    );
+    assert.equal(answer, 'The report compares several outlets. Other context stays.');
+});
+
+test('stream details show prompt and answer token usage, not the model context window', async () => {
+    global.document = {
+        createElement: tagName => new FakeElement(tagName),
+    };
+    const source = await fs.readFile(
+        path.join(__dirname, '..', 'webui', 'js', 'streamaddon.js'),
+        'utf8',
+    );
+    const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+    const { renderStreamDetails } = await import(moduleUrl);
+    const container = new FakeElement('div');
+
+    renderStreamDetails(container, {
+        prompt_tokens: 1234,
+        completion_tokens: 567,
+        context_length: 131072,
+    });
+
+    const usage = container.children.find(child => child.className === 'stream-details-usage');
+    assert.ok(usage);
+    assert.equal(usage.textContent, 'Tokens: 1,801 (1,234 prompt · 567 answer)');
+    assert.doesNotMatch(usage.textContent, /context window/i);
 });

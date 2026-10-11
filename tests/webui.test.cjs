@@ -2,8 +2,18 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const test = require('node:test');
 
-const { createWebUiServer } = require('../webui/app');
+const { conversationTitleFromPrompt, createWebUiServer } = require('../webui/app');
 const { StreamManager } = require('../webui/streamManager');
+
+test('conversation titles are immediate and concise for long prompts', () => {
+    assert.equal(conversationTitleFromPrompt('hỏi thời tiết hôm nay'), 'Hỏi thời tiết hôm nay');
+    const title = conversationTitleFromPrompt(
+        'Please help me plan a detailed migration from PostgreSQL to SQLite while preserving all existing user data and indexes.',
+    );
+    assert.match(title, /PostgreSQL to SQLite/);
+    assert.ok(title.length <= 57);
+    assert.ok(title.endsWith('…'));
+});
 
 test('WebUI uses its bridge and supports reconnecting to a server-side stream', async () => {
     const requests = [];
@@ -70,6 +80,9 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(page.body.toString('utf8'), /<link rel="icon" href="\/zeus\.ico"/);
         assert.match(page.body.toString('utf8'), /<meta name="zeus-boot-id" content="[a-f0-9-]{36}">/);
         assert.match(page.body.toString('utf8'), /src="\/ZEUSbanner\.png"/);
+        assert.match(page.body.toString('utf8'), /src="\/vendor\/markdown-it\/markdown-it\.min\.js"/);
+        assert.match(page.body.toString('utf8'), /src="\/vendor\/task-lists\/markdown-it-task-lists\.min\.js"/);
+        assert.doesNotMatch(page.body.toString('utf8'), /cdn\.jsdelivr\.net/);
         const currentBootId = page.body.toString('utf8').match(
             /<meta name="zeus-boot-id" content="([^"]+)">/,
         )[1];
@@ -78,7 +91,31 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.equal(theme.status, 200);
         assert.match(theme.body.toString('utf8'), /--accent:\s*#fb923c/);
         assert.match(theme.body.toString('utf8'), /background:\s*#100d0b/);
+        assert.match(theme.body.toString('utf8'), /\.chat-scrollbar \{[^}]*width:\s*30px;[^}]*pointer-events:\s*auto;/);
+        assert.match(theme.body.toString('utf8'), /\.chat-scrollbar::before \{[^}]*pointer-events:\s*none;/);
+        assert.match(theme.body.toString('utf8'), /\.chat-scrollbar:hover \{ opacity:\s*\.55; \}/);
         assert.doesNotMatch(theme.body.toString('utf8'), /#a78bfa|#c4b5fd/);
+
+        for (const assetPath of [
+            '/js/renderMath.js',
+            '/js/renderHTML.js',
+            '/vendor/katex/katex.min.css',
+            '/vendor/katex/katex.min.js',
+            '/vendor/dompurify/purify.min.js',
+            '/vendor/markdown-it/markdown-it.min.js',
+            '/vendor/task-lists/markdown-it-task-lists.min.js',
+            '/vendor/katex/fonts/KaTeX_Main-Regular.woff2',
+        ]) {
+            const asset = await requestRaw(assetPath);
+            assert.equal(asset.status, 200, `${assetPath} should be served`);
+            assert.ok(asset.body.length > 0, `${assetPath} should not be empty`);
+        }
+
+        const renderer = await requestRaw('/js/render.js');
+        assert.equal(renderer.status, 200);
+        const rendererText = renderer.body.toString('utf8');
+        assert.match(rendererText, /from ['"]\.\/renderMath\.js['"]/);
+        assert.match(rendererText, /from ['"]\.\/renderHTML\.js['"]/);
 
         const banner = await requestRaw('/ZEUSbanner.png');
         assert.equal(banner.status, 200);

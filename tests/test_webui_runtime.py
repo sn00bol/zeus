@@ -176,6 +176,35 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tools", payload)
         self.assertNotIn("think", payload)
 
+    def test_stream_payload_requests_final_token_usage(self) -> None:
+        payload = Router._chat_payload(
+            SimpleNamespace(name="llamacpp"),
+            "model",
+            [],
+            0.7,
+            None,
+            {"stream_options": {"continuous_usage_stats": True}},
+            stream=True,
+            think=False,
+        )
+
+        self.assertEqual(payload["stream_options"], {
+            "continuous_usage_stats": True,
+            "include_usage": True,
+        })
+
+        ollama_payload = Router._chat_payload(
+            SimpleNamespace(name="ollama"),
+            "model",
+            [],
+            0.7,
+            None,
+            {},
+            stream=True,
+            think=False,
+        )
+        self.assertEqual(ollama_payload["stream_options"], {"include_usage": True})
+
     def test_explicit_think_off_disables_template_reasoning(self) -> None:
         provider = SimpleNamespace(name="llamacpp")
         payload = Router._chat_payload(

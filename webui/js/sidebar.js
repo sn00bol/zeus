@@ -13,6 +13,10 @@ export function initializeSidebar({ api, sessionId }) {
     const searchInput = document.getElementById('search-modal-input');
     const searchResults = document.getElementById('search-results');
     const searchCloseBtn = document.getElementById('search-modal-close');
+    const activeMenuButton = document.getElementById('chat-more-button');
+    const activeMenu = document.getElementById('active-chat-menu');
+    let activeSessionId = sessionId;
+    let refreshTimer = null;
 
     /** All loaded conversations (cache for search) */
     let allConversations = [];
@@ -105,7 +109,7 @@ export function initializeSidebar({ api, sessionId }) {
     async function loadConversations() {
         const { conversations } = await api('/api/conversations?archived=all');
         allConversations = conversations; // cache for search
-        document.querySelectorAll('.conversation-menu').forEach(el => el.remove());
+        document.querySelectorAll('.conversation-menu:not(.chat-menu)').forEach(el => el.remove());
         list.replaceChildren();
         pinnedList.replaceChildren();
         const pinnedConversations = conversations.filter(
@@ -127,16 +131,26 @@ export function initializeSidebar({ api, sessionId }) {
             const targetList = conversation.metadata?.pinned ? pinnedList : list;
             const row = document.createElement('div');
             row.className = 'conversation-row';
-            if (conversation.conversation_id === sessionId) {
+            if (conversation.conversation_id === activeSessionId) {
                 row.setAttribute('aria-current', 'page');
             }
 
             const item = document.createElement('button');
             item.type = 'button';
             item.className = 'conversation-item';
-            item.textContent = conversation.preview;
+            if (conversation.is_generating) {
+                const spinner = document.createElement('span');
+                spinner.className = 'conversation-title-spinner';
+                spinner.setAttribute('aria-label', 'Agent is working');
+                item.append(spinner);
+            }
+            const title = document.createElement('span');
+            title.className = 'conversation-title';
+            title.textContent = conversation.preview;
+            item.append(title);
             item.title = conversation.preview;
             item.addEventListener('click', () => selectSession(conversation.conversation_id));
+            row.dataset.conversationId = conversation.conversation_id;
 
             const actions = document.createElement('div');
             actions.className = 'conversation-actions';
@@ -229,7 +243,7 @@ export function initializeSidebar({ api, sessionId }) {
                         } else if (action === 'delete') {
                             if (!await confirmDelete(conversation.preview)) return;
                             await updateConversation(conversation.conversation_id, action);
-                            if (conversation.conversation_id === sessionId) {
+                            if (conversation.conversation_id === activeSessionId) {
                                 startNewSession();
                                 return;
                             }
@@ -262,7 +276,146 @@ export function initializeSidebar({ api, sessionId }) {
             empty.textContent = 'No other conversations';
             list.append(empty);
         }
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(
+            () => loadConversations().catch(showConversationError),
+            conversations.some(conversation => conversation.is_generating) ? 1200 : 5000,
+        );
     }
+
+    function openMenu(button, menu) {
+        const opening = menu.hidden;
+        document.querySelectorAll('.conversation-menu').forEach(element => { element.hidden = true; });
+        document.querySelectorAll('.conversation-action[aria-expanded], .chat-more-button[aria-expanded]')
+            .forEach(element => element.setAttribute('aria-expanded', 'false'));
+        if (!opening) return;
+
+        menu.hidden = false;
+        const bounds = button.getBoundingClientRect();
+        const left = Math.min(
+            Math.max(8, bounds.right - menu.offsetWidth),
+            window.innerWidth - menu.offsetWidth - 8,
+        );
+        const below = bounds.bottom + 4;
+        menu.style.left = `${left}px`;
+        menu.style.top = below + menu.offsetHeight <= window.innerHeight - 8
+            ? `${below}px`
+            : `${Math.max(8, bounds.top - menu.offsetHeight - 4)}px`;
+        button.setAttribute('aria-expanded', 'true');
+    }
+
+    function activeConversation() {
+        return allConversations.find(conversation => (
+            conversation.conversation_id === activeSessionId
+        ));
+    }
+
+    function activeRowAndItem(conversation) {
+        const row = [...document.querySelectorAll('.conversation-row')].find(element => (
+            element.dataset.conversationId === conversation.conversation_id
+        ));
+        return row ? { row, item: row.querySelector('.conversation-item') } : null;
+    }
+
+    function safeFilename(title) {
+        const base = title.toLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 60);
+        return base || 'zeus-conversation';
+    }
+
+    async function exportConversation(conversation, format, printWindow = null) {
+        const { messages } = await api(
+            `/api/history?conversationId=${encodeURIComponent(conversation.conversation_id)}`,
+        );
+        const printable = messages
+            .filter(message => message.role === 'user' || message.role === 'assistant')
+            .map(message => `<section><h2>${escapeHtml(message.role === 'user' ? 'You' : 'ZEUS')}</h2><p>${escapeHtml(message.content || '')}</p></section>`)
+            .join('');
+        const page = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(conversation.preview)}</title><style>body{font:15px/1.6 Arial,sans-serif;max-width:820px;margin:40px auto;color:#222}h1{font-size:24px}h2{font-size:13px;color:#6b4b32}section{margin:24px 0;white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><h1>${escapeHtml(conversation.preview)}</h1>${printable}</body></html>`;
+        const filename = safeFilename(conversation.preview);
+
+        if (format === 'pdf') {
+            if (!printWindow) throw new Error('The PDF print window could not be opened.');
+            printWindow.document.open();
+            printWindow.document.write(page);
+            printWindow.document.close();
+            window.setTimeout(() => {
+                printWindow.focus();
+                printWindow.print();
+            }, 250);
+            return;
+        }
+
+        const blob = new Blob([page], { type: 'application/msword;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${filename}.doc`;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    function addActiveMenuAction(label, action, danger = false) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.dataset.action = action;
+        if (danger) button.classList.add('danger');
+        button.addEventListener('click', async () => {
+            activeMenu.hidden = true;
+            activeMenuButton.setAttribute('aria-expanded', 'false');
+            const conversation = activeConversation();
+            if (!conversation) return;
+            try {
+                if (action === 'rename') {
+                    const target = activeRowAndItem(conversation);
+                    if (target) beginRename(conversation, target.row, target.item);
+                    return;
+                }
+                if (action === 'delete') {
+                    if (!await confirmDelete(conversation.preview)) return;
+                    await updateConversation(conversation.conversation_id, 'delete');
+                    if (conversation.conversation_id === activeSessionId) startNewSession();
+                    await loadConversations();
+                    return;
+                }
+                if (action === 'pin') {
+                    await updateConversation(conversation.conversation_id, 'pin', {
+                        value: !conversation.metadata?.pinned,
+                    });
+                    await loadConversations();
+                    return;
+                }
+                let printWindow = null;
+                if (action === 'pdf') {
+                    printWindow = window.open('', '_blank');
+                    if (!printWindow) throw new Error('Allow pop-ups to print this conversation as PDF.');
+                }
+                await exportConversation(conversation, action, printWindow);
+            } catch (error) {
+                showConversationError(error);
+            }
+        });
+        activeMenu.append(button);
+    }
+
+    addActiveMenuAction('Pin', 'pin');
+    addActiveMenuAction('Rename', 'rename');
+    addActiveMenuAction('Download PDF', 'pdf');
+    addActiveMenuAction('Export document (.doc)', 'doc');
+    addActiveMenuAction('Delete', 'delete', true);
+    activeMenuButton.addEventListener('click', () => {
+        const conversation = activeConversation();
+        const pinAction = activeMenu.querySelector('[data-action="pin"]');
+        if (conversation && pinAction) {
+            pinAction.textContent = conversation.metadata?.pinned ? 'Unpin' : 'Pin';
+        }
+        openMenu(activeMenuButton, activeMenu);
+    });
 
     // ─── Search modal ─────────────────────────────────────────────────────────
 
@@ -383,9 +536,9 @@ export function initializeSidebar({ api, sessionId }) {
     });
 
     document.addEventListener('click', event => {
-        if (event.target.closest('.conversation-row, .conversation-menu')) return;
+        if (event.target.closest('.conversation-row, .conversation-menu, .chat-actions')) return;
         document.querySelectorAll('.conversation-menu').forEach(el => { el.hidden = true; });
-        document.querySelectorAll('.conversation-action[aria-expanded]').forEach(el => {
+        document.querySelectorAll('.conversation-action[aria-expanded], .chat-more-button[aria-expanded]').forEach(el => {
             el.setAttribute('aria-expanded', 'false');
         });
     });
@@ -394,5 +547,14 @@ export function initializeSidebar({ api, sessionId }) {
     setMenuOpen(!mobileLayout.matches);
     mobileLayout.addEventListener('change', event => setMenuOpen(!event.matches));
 
-    return { loadConversations };
+    return {
+        loadConversations,
+        setSessionId(id) {
+            activeSessionId = id;
+            document.querySelectorAll('.conversation-row').forEach(row => {
+                if (row.dataset.conversationId === id) row.setAttribute('aria-current', 'page');
+                else row.removeAttribute('aria-current');
+            });
+        },
+    };
 }

@@ -18,8 +18,8 @@ dependencies = [
     "uvicorn",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Operating System :: OS Independent",
+    "Development Status :: Experiment",
+    "Operating System :: Window 10+/Any Linux distro",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
 ]

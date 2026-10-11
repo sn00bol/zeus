@@ -1,0 +1,1 @@
+searXNG config folder, anything is complete and running well so dont change anything here

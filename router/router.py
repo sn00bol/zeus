@@ -687,6 +687,10 @@ class Router:
             "stream": stream,
             **extra,
         }
+        if stream:
+            stream_options = dict(payload.get("stream_options") or {})
+            stream_options["include_usage"] = True
+            payload["stream_options"] = stream_options
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
         explicit_think = "think" in extra

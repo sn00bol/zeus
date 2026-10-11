@@ -58,6 +58,22 @@ function validateStreamId(value) {
     return value;
 }
 
+function conversationTitleFromPrompt(prompt) {
+    const normalized = prompt
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^[\s"'`]+|[\s"'`]+$/g, '');
+    if (normalized.length <= 56) {
+        return normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1);
+    }
+
+    const opening = normalized
+        .split(/(?<=[.!?。！？])\s+/u, 1)[0]
+        .replace(/^(?:(?:please\s+)?(?:help me|can you|could you|i want to)\s+|(?:hãy\s+)?(?:giúp tôi|giúp mình|mình muốn|tôi muốn)\s+)/i, '');
+    const concise = opening.split(' ').slice(0, 8).join(' ');
+    return `${concise.slice(0, 56).replace(/[\s,;:.-]+$/g, '')}…`;
+}
+
 async function readJson(request) {
     if (!String(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) {
         throw new HttpError(415, 'Content-Type must be application/json.');
@@ -139,7 +155,7 @@ function createWebUiServer({
                 sendStatic(response, path.join(__dirname, 'zeus.ico'), 'image/x-icon');
                 return;
             }
-            const assetMatch = url.pathname.match(/^\/js\/(chat|render|loading|stream|streamaddon|model|sidebar|session|theme)\.js$/);
+            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|sidebar|session|theme)\.js$/);
             if (request.method === 'GET' && assetMatch) {
                 sendStatic(
                     response,
@@ -147,6 +163,59 @@ function createWebUiServer({
                     'text/javascript; charset=utf-8',
                 );
                 return;
+            }
+            const vendorAssetMatch = url.pathname.match(
+                /^\/vendor\/(katex\/(?:katex\.min\.(?:css|js)|fonts\/KaTeX_[A-Za-z0-9_-]+\.(?:woff2?|ttf))|dompurify\/purify\.min\.js|markdown-it\/markdown-it\.min\.js|task-lists\/markdown-it-task-lists\.min\.js)$/,
+            );
+            if (request.method === 'GET' && vendorAssetMatch) {
+                const asset = vendorAssetMatch[1];
+                let assetPath;
+                if (asset.startsWith('katex/')) {
+                    assetPath = path.join(
+                        ROOT,
+                        'node_modules',
+                        'katex',
+                        'dist',
+                        asset.slice('katex/'.length),
+                    );
+                } else if (asset.startsWith('dompurify/')) {
+                    assetPath = path.join(
+                        ROOT,
+                        'node_modules',
+                        'dompurify',
+                        'dist',
+                        'purify.min.js',
+                    );
+                } else if (asset.startsWith('markdown-it/')) {
+                    assetPath = path.join(
+                        ROOT,
+                        'node_modules',
+                        'markdown-it',
+                        'dist',
+                        'markdown-it.min.js',
+                    );
+                } else {
+                    assetPath = path.join(
+                        ROOT,
+                        'node_modules',
+                        'markdown-it-task-lists',
+                        'dist',
+                        'markdown-it-task-lists.min.js',
+                    );
+                }
+
+                const extension = path.extname(assetPath);
+                const contentType = {
+                    '.css': 'text/css; charset=utf-8',
+                    '.js': 'text/javascript; charset=utf-8',
+                    '.ttf': 'font/ttf',
+                    '.woff': 'font/woff',
+                    '.woff2': 'font/woff2',
+                }[extension];
+                if (contentType && fs.existsSync(assetPath)) {
+                    sendStatic(response, assetPath, contentType);
+                    return;
+                }
             }
             const iconMatch = url.pathname.match(/^\/icon\/([a-zA-Z0-9_-]+)\.png$/);
             if (request.method === 'GET' && iconMatch) {
@@ -276,12 +345,12 @@ function createWebUiServer({
                                NULLIF(chat_session.metadata->>'title', ''),
                                (
                                    SELECT LEFT(message.payload->>'content', 72)
-                               FROM chat_messages AS message
-                               WHERE message.platform = chat_session.platform
-                                 AND message.conversation_id = chat_session.conversation_id
-                                 AND message.role = 'user'
-                               ORDER BY message.created_at ASC, message.id ASC
-                               LIMIT 1
+                                   FROM chat_messages AS message
+                                   WHERE message.platform = chat_session.platform
+                                     AND message.conversation_id = chat_session.conversation_id
+                                     AND message.role = 'user'
+                                   ORDER BY message.created_at ASC, message.id ASC
+                                   LIMIT 1
                                ),
                                'New conversation'
                            ) AS preview
@@ -292,7 +361,14 @@ function createWebUiServer({
                              COALESCE(chat_session.last_message_at, chat_session.updated_at) DESC
                     LIMIT 20
                 `, [PLATFORM, archivedFilter]);
-                sendJson(response, 200, { conversations: rows });
+                sendJson(response, 200, {
+                    conversations: rows.map(row => ({
+                        ...row,
+                        is_generating: Boolean(
+                            streamManager.activeForConversation(row.conversation_id)
+                        ),
+                    })),
+                });
                 return;
             }
             const conversationAction = url.pathname.match(/^\/api\/conversations\/([^/]+)$/);
@@ -392,6 +468,23 @@ function createWebUiServer({
                     limit: 100,
                 });
                 const preference = await db.getModelPreference(modelScope(conversationId));
+                const isFirstMessage = history.filter(item => item.role === 'user').length === 1;
+                if (isFirstMessage) {
+                    const title = conversationTitleFromPrompt(message);
+                    await db.pool.query(`
+                        UPDATE chat_sessions
+                        SET metadata = (
+                                COALESCE(metadata, '{}'::jsonb)
+                                - 'title_pending_boot'
+                                - 'title_generation_requested'
+                            ) || CASE WHEN COALESCE(metadata->>'title', '') = ''
+                                THEN jsonb_build_object('title', $3::text)
+                                ELSE '{}'::jsonb END,
+                            updated_at = NOW()
+                        WHERE platform = $1
+                          AND conversation_id = $2
+                    `, [PLATFORM, conversationId, title]);
+                }
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
                     const result = await requestSse('/infer', {
@@ -558,4 +651,8 @@ if (require.main === module) {
     });
 }
 
-module.exports = { createWebUiServer, validateConversationId };
+module.exports = {
+    conversationTitleFromPrompt,
+    createWebUiServer,
+    validateConversationId,
+};

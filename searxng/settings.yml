@@ -6,3 +6,10 @@ server:
 search:
   formats:
     - html
+
+engines:
+  - name: ahmia
+    disabled: true
+
+  - name: torch
+    disabled: true

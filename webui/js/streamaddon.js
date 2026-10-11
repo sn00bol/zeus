@@ -1,7 +1,58 @@
+function normalizeSourceLabel(value) {
+    return value.normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/đ/g, 'd')
+        .replace(/[^a-z0-9]/g, '');
+}
+
+export function removeInlineSourceCitations(content, sources) {
+    if (!Array.isArray(sources) || sources.length === 0) return content;
+
+    const sourceLabels = new Set();
+    const ignoredHostLabels = new Set([
+        'www', 'm', 'mobile', 'news', 'en', 'amp',
+        'com', 'org', 'net', 'edu', 'gov', 'co', 'vn', 'uk', 'io',
+    ]);
+    for (const source of sources) {
+        if (typeof source?.url !== 'string') continue;
+        try {
+            const url = new URL(source.url);
+            if (!['http:', 'https:'].includes(url.protocol)) continue;
+            for (const label of url.hostname.toLowerCase().split('.')) {
+                if (!ignoredHostLabels.has(label)) sourceLabels.add(normalizeSourceLabel(label));
+            }
+        } catch {
+            continue;
+        }
+    }
+    if (sourceLabels.size === 0) return content;
+
+    return String(content ?? '')
+        .replace(/【\s*\d+(?:\s*[,，、]\s*\d+)*\s*】/g, '')
+        .replace(/\[(?:\d+\s*(?:[,，、]\s*\d+\s*)*)\]/g, '')
+        .replace(/\(([^()\n]{2,160})\)/g, (citation, labels) => {
+            const citedSources = labels
+                .split(/\s*(?:,|;|\/|&|\band\b|\bvà\b)\s*/i)
+                .map(normalizeSourceLabel)
+                .filter(Boolean);
+            return citedSources.length > 0 && citedSources.every(label => sourceLabels.has(label))
+                ? ''
+                : citation;
+        })
+        .replace(/[ \t]+([,.;!?])/g, '$1')
+        .replace(/[ \t]{2,}/g, ' ');
+}
+
 export function renderStreamDetails(container, details) {
+    const hasTokenUsage = (
+        Number.isFinite(details?.prompt_tokens) && details.prompt_tokens > 0
+    ) || (
+        Number.isFinite(details?.completion_tokens) && details.completion_tokens > 0
+    );
     if (!details || (
-        !details.provider && !details.model && !details.context_length
-        && !details.sources?.length
+        !details.provider && !details.model && !details.sources?.length
+        && !hasTokenUsage
     )) return;
     container.replaceChildren();
 
@@ -62,14 +113,10 @@ export function renderStreamDetails(container, details) {
         : 0;
     const usage = [];
     if (promptTokens > 0 || completionTokens > 0) {
-        const totalTokens = new Intl.NumberFormat().format(promptTokens + completionTokens);
+        const formatter = new Intl.NumberFormat();
+        const totalTokens = formatter.format(promptTokens + completionTokens);
         usage.push(
-            `Tokens: ${totalTokens} (${promptTokens} prompt · ${completionTokens} completion)`,
-        );
-    }
-    if (Number.isFinite(details.context_length) && details.context_length > 0) {
-        usage.push(
-            `Model context window: ${new Intl.NumberFormat().format(details.context_length)} tokens`,
+            `Tokens: ${totalTokens} (${formatter.format(promptTokens)} prompt · ${formatter.format(completionTokens)} answer)`,
         );
     }
     if (usage.length) {
