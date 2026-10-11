@@ -27,6 +27,7 @@ load_dotenv()
 
 from core.database import DatabaseRouter
 from core.memory import MemoryStore
+from core.agent_store import AgentRunStore
 from core.session_manager import SessionManager
 from core.version import get_version
 from router.agent import AgentQueueFull, AgentRunner
@@ -45,7 +46,8 @@ _database = DatabaseRouter()
 _session_manager = SessionManager(_database)
 _memory_store = MemoryStore(_database)
 _router = Router(memory_store=_memory_store, session_manager=_session_manager)
-_agent_runner = AgentRunner(_router)
+_agent_store = AgentRunStore(_database)
+_agent_runner = AgentRunner(_router, _agent_store)
 _control_queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1)
 
 
@@ -61,6 +63,7 @@ def _response_payload(response: InferenceResponse) -> dict[str, Any]:
         "prompt_tokens": response.prompt_tokens,
         "completion_tokens": response.completion_tokens,
         "finish_reason": response.finish_reason,
+        "thinking": response.thinking,
     }
 
 
@@ -167,6 +170,7 @@ class BridgeApplication:
             event = await receive()
             if event["type"] == "lifespan.startup":
                 await _database.initialize()
+                await _agent_store.initialize()
                 await _memory_store.start()
                 await _agent_runner.start()
                 await send({"type": "lifespan.startup.complete"})
@@ -302,7 +306,8 @@ class BridgeApplication:
                 body = await _read_json(receive)
                 request = _inference_request(body)
             except ValueError as exc:
-                await _send_json(send, {"error": str(exc)}, status=400)                return
+                await _send_json(send, {"error": str(exc)}, status=400)
+                return
 
             session_data = body.get("session")
             if session_data is not None:

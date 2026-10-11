@@ -3,7 +3,7 @@ const {
     generateConversationReply,
     storeAssistantReply,
 } = require('../utils/agentConversation');
-const MAX_REPLY_LENGTH = 1_900;
+const { formatAgentResponse } = require('../utils/chatThreads');
 
 function getPrompt(context, args) {
     if (context.isChatInputCommand?.()) {
@@ -41,16 +41,14 @@ module.exports = {
                 messageId: context.id,
                 prompt,
             });
-            const response = result.content.length > MAX_REPLY_LENGTH
-                ? `${result.content.slice(0, MAX_REPLY_LENGTH - 3)}...`
-                : result.content;
+            const response = formatAgentResponse(result);
             const sentMessage = await replyToCommand(context, response);
             try {
                 await storeAssistantReply(context.client, {
                     conversationId,
                     guildId: context.guildId || context.guild?.id,
                     messageId: sentMessage?.id || `agent-${context.id}-assistant`,
-                    content: response,
+                    content: result.content,
                     promptTokens: result.promptTokens,
                     completionTokens: result.completionTokens,
                 });

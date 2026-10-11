@@ -10,9 +10,6 @@
     "healthcheck": "node platform/scripts/healthcheck.js",
     "test": "node --test"
   },
-  "keywords": [
-    "santaa"
-  ],
   "author": "sn00bol",
   "license": "GPL-3.0-only",
   "type": "commonjs",

@@ -29,7 +29,7 @@ export function createLoadingIndicator(label = 'Thinking…') {
 
     const thinkingContent = document.createElement('pre');
     thinkingContent.className = 'thinking-text';
-    thinkingContent.textContent = 'Waiting for model reasoning…';
+    thinkingContent.textContent = 'Thinking...';
     panel.append(thinkingContent);
 
     row.append(spinner, text, toggle);
@@ -48,6 +48,13 @@ export function createLoadingIndicator(label = 'Thinking…') {
     };
 
     timerId = setInterval(updateTimer, 200);
+
+    const stopTimer = () => {
+        if (timerId) {
+            clearInterval(timerId);
+            timerId = null;
+        }
+    };
 
     const syncToggle = () => {
         toggle.setAttribute('aria-expanded', String(expanded));
@@ -68,6 +75,11 @@ export function createLoadingIndicator(label = 'Thinking…') {
         setLabel(value) {
             text.textContent = value;
         },
+        setGenerating() {
+            stopTimer();
+            spinner.remove();
+            text.textContent = 'Responding…';
+        },
         appendThinking(value) {
             if (!value) return;
             thinking += value;
@@ -86,10 +98,7 @@ export function createLoadingIndicator(label = 'Thinking…') {
         finish() {
             if (isFinished) return;
             isFinished = true;
-            if (timerId) {
-                clearInterval(timerId);
-                timerId = null;
-            }
+            stopTimer();
             spinner.remove();
 
             if (thinking.trim()) {
@@ -100,11 +109,13 @@ export function createLoadingIndicator(label = 'Thinking…') {
                 return;
             }
 
-            // If no thinking content was generated, clean up wrapper
-            wrapper.remove();
+            // If no thinking content was generated, explicitly show it
+            text.textContent = 'No reasoning provided';
+            thinkingContent.textContent = 'The model did not provide a reasoning trace for this response.';
+            wrapper.classList.add('thinking-finished');
         },
         remove() {
-            if (timerId) clearInterval(timerId);
+            stopTimer();
             wrapper.remove();
         },
     };

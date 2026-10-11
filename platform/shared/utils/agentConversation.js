@@ -140,6 +140,7 @@ async function generateConversationReply({
     const result = await waitForRun(run.run_id);
     return {
         content: result.content,
+        thinking: result.thinking || '',
         model: selection.model,
         provider: selection.provider,
         scopeId,

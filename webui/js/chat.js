@@ -254,7 +254,7 @@ async function watchAssistantStream(streamId, response) {
                     loading.appendThinking(data.text || '');
                     scrollToLatest();
                 } else if (type === 'delta') {
-                    loading.finish();
+                    loading.setGenerating();
                     renderedText += data.text;
                     scheduleRender();
                 } else if (type === 'streamaddon') {

@@ -6,6 +6,26 @@ const { formatText } = require('../utils/formatter');
 
 const MAX_REPLY_LENGTH = 4096;
 
+function formatAgentResponse(result) {
+    let content = formatText(result.content);
+    if (content.length > MAX_REPLY_LENGTH) {
+        content = content.slice(0, MAX_REPLY_LENGTH - 3) + '...';
+    }
+
+    const thinking = String(result.thinking || '').trim();
+    if (!thinking || content.length >= MAX_REPLY_LENGTH - 40) return content;
+
+    const prefix = '<blockquote expandable>💭 ';
+    const suffix = '</blockquote>\n\n';
+    const budget = MAX_REPLY_LENGTH - content.length - prefix.length - suffix.length;
+    let excerpt = thinking.slice(0, Math.max(0, budget - 16));
+    while (excerpt && formatText(excerpt).length > budget) {
+        excerpt = excerpt.slice(0, -1);
+    }
+    if (!excerpt) return content;
+    return `${prefix}${formatText(excerpt)}${suffix}${content}`;
+}
+
 async function respondToUser(
     client,
     ctx,
@@ -23,14 +43,7 @@ async function respondToUser(
             prompt,
         });
 
-        let response = result.content;
-        
-        // Format the AI response for Telegram (Convert Discord Markdown to HTML)
-        response = formatText(response);
-
-        if (response.length > MAX_REPLY_LENGTH) {
-            response = response.slice(0, MAX_REPLY_LENGTH - 3) + '...';
-        }
+        const response = formatAgentResponse(result);
 
         const sentMessage = await ctx.reply(response, { parse_mode: 'HTML' });
 
@@ -38,7 +51,7 @@ async function respondToUser(
             await storeAssistantReply(client, {
                 conversationId: message.chat.id.toString(),
                 messageId: sentMessage.message_id.toString(),
-                content: response,
+                content: result.content,
                 promptTokens: result.promptTokens,
                 completionTokens: result.completionTokens,
             });
@@ -56,5 +69,6 @@ async function respondToUser(
 }
 
 module.exports = {
+    formatAgentResponse,
     respondToUser,
 };

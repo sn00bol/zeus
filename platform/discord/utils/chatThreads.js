@@ -6,6 +6,23 @@ const {
 
 const MAX_REPLY_LENGTH = 1_900;
 
+function formatAgentResponse(result) {
+    const content = result.content.length > MAX_REPLY_LENGTH
+        ? `${result.content.slice(0, MAX_REPLY_LENGTH - 3)}...`
+        : result.content;
+    const thinking = String(result.thinking || '').trim();
+    if (!thinking || content.length >= MAX_REPLY_LENGTH - 12) return content;
+
+    const prefix = '||💭 ';
+    const suffix = '||\n\n';
+    const budget = MAX_REPLY_LENGTH - content.length - prefix.length - suffix.length;
+    if (budget <= 0) return content;
+    const excerpt = thinking.length > budget
+        ? `${thinking.slice(0, budget - 1)}…`
+        : thinking;
+    return `${prefix}${excerpt}${suffix}${content}`;
+}
+
 function getPromptWithoutBotMention(message, botId) {
     return message.content.replace(new RegExp(`<@!?${botId}>`, 'g'), '').trim();
 }
@@ -28,16 +45,14 @@ async function respondInChatThread(
             messageId,
             prompt,
         });
-        const response = result.content.length > MAX_REPLY_LENGTH
-            ? `${result.content.slice(0, MAX_REPLY_LENGTH - 3)}...`
-            : result.content;
+        const response = formatAgentResponse(result);
         const sentMessage = await channel.send(response);
         try {
             await storeAssistantReply(client, {
                 conversationId: channel.id,
                 guildId: chatThread.guild_id,
                 messageId: sentMessage.id,
-                content: response,
+                content: result.content,
                 promptTokens: result.promptTokens,
                 completionTokens: result.completionTokens,
             });
@@ -93,6 +108,7 @@ async function createChatThread(client, message, {
 
 module.exports = {
     createChatThread,
+    formatAgentResponse,
     getPromptWithoutBotMention,
     respondInChatThread,
 };
