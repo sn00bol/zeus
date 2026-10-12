@@ -451,40 +451,50 @@ function createWebUiServer({
                     throw new HttpError(400, 'tools must contain only available tool names.');
                 }
 
+                const isTemporary = Boolean(body.isTemporary || body.temporary);
                 const userId = `webui-${conversationId}`;
-                await db.appendMessage({
-                    platform: PLATFORM,
-                    conversation_id: conversationId,
-                    message_id: randomUUID(),
-                    role: 'user',
-                    content: message,
-                    user_id: userId,
-                    timestamp: new Date().toISOString(),
-                });
+                let history;
+                if (isTemporary) {
+                    if (Array.isArray(body.messages) && body.messages.length > 0) {
+                        history = body.messages.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+                    } else {
+                        history = [{ role: 'user', content: message }];
+                    }
+                } else {
+                    await db.appendMessage({
+                        platform: PLATFORM,
+                        conversation_id: conversationId,
+                        message_id: randomUUID(),
+                        role: 'user',
+                        content: message,
+                        user_id: userId,
+                        timestamp: new Date().toISOString(),
+                    });
 
-                const history = await db.getMessages({
-                    platform: PLATFORM,
-                    conversationId,
-                    limit: 100,
-                });
-                const preference = await db.getModelPreference(modelScope(conversationId));
-                const isFirstMessage = history.filter(item => item.role === 'user').length === 1;
-                if (isFirstMessage) {
-                    const title = conversationTitleFromPrompt(message);
-                    await db.pool.query(`
-                        UPDATE chat_sessions
-                        SET metadata = (
-                                COALESCE(metadata, '{}'::jsonb)
-                                - 'title_pending_boot'
-                                - 'title_generation_requested'
-                            ) || CASE WHEN COALESCE(metadata->>'title', '') = ''
-                                THEN jsonb_build_object('title', $3::text)
-                                ELSE '{}'::jsonb END,
-                            updated_at = NOW()
-                        WHERE platform = $1
-                          AND conversation_id = $2
-                    `, [PLATFORM, conversationId, title]);
+                    history = await db.getMessages({
+                        platform: PLATFORM,
+                        conversationId,
+                        limit: 100,
+                    });
+                    const isFirstMessage = history.filter(item => item.role === 'user').length === 1;
+                    if (isFirstMessage) {
+                        const title = conversationTitleFromPrompt(message);
+                        await db.pool.query(`
+                            UPDATE chat_sessions
+                            SET metadata = (
+                                    COALESCE(metadata, '{}'::jsonb)
+                                    - 'title_pending_boot'
+                                    - 'title_generation_requested'
+                                ) || CASE WHEN COALESCE(metadata->>'title', '') = ''
+                                    THEN jsonb_build_object('title', $3::text)
+                                    ELSE '{}'::jsonb END,
+                                updated_at = NOW()
+                            WHERE platform = $1
+                              AND conversation_id = $2
+                        `, [PLATFORM, conversationId, title]);
+                    }
                 }
+                const preference = await db.getModelPreference(modelScope(conversationId));
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
                     const result = await requestSse('/infer', {
@@ -530,7 +540,9 @@ function createWebUiServer({
                         },
                         timestamp: new Date().toISOString(),
                     };
-                    await db.appendMessage(assistantMessage);
+                    if (!isTemporary) {
+                        await db.appendMessage(assistantMessage);
+                    }
                     publish('streamaddon', {
                         provider: result.provider,
                         model: result.model,

@@ -26,8 +26,6 @@ Database: PostgresSQL
 TODOS:
 - Add AI Agents sandbox enviroments to test running python code, testing, debug,...
 - Add limit text on platform to prevent not fully display or send prompt too long, and platform have max token
-- Add temporarily chat
-- Add supporting rendering for Telegram, math/chemical stuff
-- Add random text for fun when start new chat
+- Add supporting rendering for Telegram
 - Add ZEUS Webui settings, model selection more advance
 - Add support image/file,... (and no limits)

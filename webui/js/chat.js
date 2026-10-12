@@ -16,6 +16,8 @@ let messagesElement = document.getElementById('messages');
 const scrollElement = document.getElementById('chat-scroll');
 const chatElement = document.querySelector('.chat');
 const chatActions = document.getElementById('chat-actions');
+const tempChatButton = document.getElementById('temp-chat-button');
+const chatMoreButton = document.getElementById('chat-more-button');
 const scrollBar = document.getElementById('chat-scrollbar');
 const scrollThumb = document.getElementById('chat-scrollbar-thumb');
 const welcomeElement = document.getElementById('welcome');
@@ -55,6 +57,89 @@ let scrollDragging = false;
 let scrollDragOffset = 0;
 let promptScrollDragging = false;
 let promptScrollDragOffset = 0;
+let isTempChat = false;
+let tempMessagesList = [];
+let userPinnedToBottom = true;
+
+const WELCOME_MESSAGES = [
+    'Howdy, wanna talk something?',
+    'Are you ready to ask something?',
+    'What did you want to do today?',
+    'Hello! What can I help you with?',
+    'Greetings! What\'s on your mind?',
+    'Hi there! Ready for some answers?',
+    'Hello! Ready to explore something new?',
+];
+
+function isNearBottom(threshold = 70) {
+    return (scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight) <= threshold;
+}
+
+function scrollToLatest(force = false) {
+    if (force) {
+        userPinnedToBottom = true;
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+        return;
+    }
+    if (userPinnedToBottom) {
+        scrollElement.scrollTop = scrollElement.scrollHeight;
+    }
+}
+
+function setTempChatMode(active) {
+    isTempChat = Boolean(active);
+    document.body.classList.toggle('temp-chat-mode', isTempChat);
+    if (tempChatButton) {
+        tempChatButton.classList.toggle('active', isTempChat);
+        tempChatButton.setAttribute('aria-pressed', String(isTempChat));
+        tempChatButton.title = isTempChat
+            ? 'Temporary chat is active. Click to exit.'
+            : 'Temporary chat';
+    }
+    if (chatMoreButton) {
+        // Temp chat always allows options (e.g., delete), but empty chats typically don't
+        chatMoreButton.hidden = !isTempChat && (messagesElement.childElementCount === 0);
+    }
+}
+
+if (tempChatButton) {
+    tempChatButton.addEventListener('click', () => {
+        if (!isTempChat) {
+            setTempChatMode(true);
+            tempChatButton.hidden = true;
+            const tempSessionId = `temp-${Date.now()}`;
+            conversationId = tempSessionId;
+            tempMessagesList = [];
+            const tempContainer = createMessageContainer();
+            tempContainer.dataset.historyLoaded = 'true';
+            sessionViews.set(tempSessionId, tempContainer);
+            if (messagesElement !== tempContainer) {
+                messagesElement.removeAttribute('id');
+                tempContainer.id = 'messages';
+                messagesElement.replaceWith(tempContainer);
+                messagesElement = tempContainer;
+            }
+            welcomeElement.hidden = false;
+            document.getElementById('welcome-text').textContent = 'Temporary chat';
+            document.getElementById('welcome-subtitle').hidden = false;
+            setEmptyChatLayout(true);
+            input.value = '';
+            selectedTools = [];
+            renderSelectedTools();
+            closeToolMenu();
+            resizePrompt();
+            updateSendButton();
+            input.focus();
+        } else {
+            setTempChatMode(false);
+            tempChatButton.hidden = false;
+            document.getElementById('welcome-text').textContent = WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)];
+            document.getElementById('welcome-subtitle').hidden = true;
+            sidebar.startNewSession?.();
+            window.dispatchEvent(new CustomEvent('zeus:session-change', { detail: getSessionId() }));
+        }
+    });
+}
 
 function updateThinkingModeUI() {
     if (!thinkingModeButton || !thinkingModeLabel) return;
@@ -81,6 +166,10 @@ function getThinkParam() {
     if (thinkingMode === 'off') return false;
     return undefined;
 }
+
+function hasAssistantMessage(container = messagesElement) {
+    return container.querySelector('.message.assistant') !== null;
+}
 const sidebar = initializeSidebar({ api, sessionId: conversationId });
 document.getElementById('menubar-brand').addEventListener('click', () => {
     window.location.reload();
@@ -88,19 +177,19 @@ document.getElementById('menubar-brand').addEventListener('click', () => {
 
 function setEmptyChatLayout(empty) {
     if (empty) {
+        tempChatButton.hidden = false;
         welcomeStage.append(composerWrap, chatFooter);
         chatDock.hidden = true;
         chatElement.classList.add('welcome-state');
         return;
     }
+    tempChatButton.hidden = true;
     chatDock.append(composerWrap, chatFooter);
     chatDock.hidden = false;
     chatElement.classList.remove('welcome-state');
 }
 
-function scrollToLatest() {
-    scrollElement.scrollTop = scrollElement.scrollHeight;
-}
+
 
 function updateScrollBar() {
     const maxScroll = scrollElement.scrollHeight - scrollElement.clientHeight;
@@ -224,13 +313,40 @@ window.addEventListener('resize', updatePromptScrollBar);
 const promptResizeObserver = new ResizeObserver(updatePromptScrollBar);
 promptResizeObserver.observe(input);
 
+scrollElement.addEventListener('wheel', event => {
+    if (event.deltaY < 0) {
+        userPinnedToBottom = false;
+    } else if (event.deltaY > 0 && isNearBottom(50)) {
+        userPinnedToBottom = true;
+    }
+}, { passive: true });
+
+let touchStartY = 0;
+scrollElement.addEventListener('touchstart', event => {
+    if (event.touches.length) touchStartY = event.touches[0].clientY;
+}, { passive: true });
+scrollElement.addEventListener('touchmove', event => {
+    if (event.touches.length) {
+        const delta = event.touches[0].clientY - touchStartY;
+        if (delta > 6) {
+            userPinnedToBottom = false;
+        } else if (isNearBottom(50)) {
+            userPinnedToBottom = true;
+        }
+    }
+}, { passive: true });
+
 scrollElement.addEventListener('scroll', () => {
+    if (isNearBottom(60)) {
+        userPinnedToBottom = true;
+    }
     updateScrollBar();
     showScrollBar();
 }, { passive: true });
 scrollBar.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
     event.preventDefault();
+    userPinnedToBottom = false;
     scrollDragging = true;
     scrollBar.setPointerCapture(event.pointerId);
     const thumbBounds = scrollThumb.getBoundingClientRect();
@@ -336,7 +452,7 @@ function addMessage(
     container.append(item);
     if (container === messagesElement) {
         welcomeElement.hidden = true;
-        scrollToLatest();
+        scrollToLatest(true);
     }
     return { item, thinking, contentElement, details };
 }
@@ -350,7 +466,7 @@ function setAssistantContent(message, content, sources = []) {
             : content,
     );
     addCodeCopyControls(message.contentElement);
-    if (messagesElement.contains(message.item)) scrollToLatest();
+    if (messagesElement.contains(message.item)) scrollToLatest(false);
 }
 
 async function api(url, options = {}) {
@@ -604,7 +720,7 @@ async function watchAssistantStream(streamId, response) {
                     if (data.state === 'complete' || data.state === 'error') loading.finish();
                 } else if (type === 'thinking') {
                     loading.appendThinking(data.text || '');
-                    if (messagesElement.contains(response.item)) scrollToLatest();
+                    if (messagesElement.contains(response.item)) scrollToLatest(false);
                 } else if (type === 'delta') {
                     loading.setGenerating();
                     renderedText += data.text;
@@ -625,6 +741,12 @@ async function watchAssistantStream(streamId, response) {
             result.message?.content || renderedText,
             result.message?.sources,
         );
+        if (isTempChat) {
+            tempMessagesList.push({
+                role: 'assistant',
+                content: result.message?.content || renderedText,
+            });
+        }
         if (!loading.element.isConnected) response.thinking.hidden = true;
     } catch (error) {
         if (renderTimer) cancelAnimationFrame(renderTimer);
@@ -683,14 +805,21 @@ form.addEventListener('submit', async event => {
     messageContainer.dataset.historyLoaded = 'true';
     updateSendButton();
     setEmptyChatLayout(false);
+    userPinnedToBottom = true;
     addMessage('user', messageText);
+    if (isTempChat) {
+        tempMessagesList.push({ role: 'user', content: messageText });
+    }
     chatActions.hidden = false;
+    if (chatMoreButton) chatMoreButton.hidden = isTempChat;
     input.value = '';
     selectedTools = [];
     renderSelectedTools();
     closeToolMenu();
     resizePrompt();
     const response = addMessage('assistant', '', {}, messageContainer);
+    // Show the more button after assistant message is added
+    if (chatMoreButton) chatMoreButton.hidden = false;
 
     try {
         const streamId = await startChatStream({
@@ -698,11 +827,15 @@ form.addEventListener('submit', async event => {
             message: messageText,
             think: getThinkParam(),
             tools,
+            isTemporary: isTempChat,
+            messages: isTempChat ? tempMessagesList : [],
         });
         activeStreams.set(sessionId, streamId);
-        sidebar.loadConversations().catch(error => {
-            console.error('[WEBUI] Could not refresh conversation list:', error);
-        });
+        if (!isTempChat) {
+            sidebar.loadConversations().catch(error => {
+                console.error('[WEBUI] Could not refresh conversation list:', error);
+            });
+        }
         await watchAssistantStream(streamId, response);
     } catch (error) {
         response.item.classList.add('error');
@@ -715,9 +848,11 @@ form.addEventListener('submit', async event => {
             updateSendButton();
             input.focus();
         }
-        sidebar.loadConversations().catch(error => {
-            console.error('[WEBUI] Could not refresh conversation list:', error);
-        });
+        if (!isTempChat) {
+            sidebar.loadConversations().catch(error => {
+                console.error('[WEBUI] Could not refresh conversation list:', error);
+            });
+        }
     }
 });
 
@@ -736,6 +871,7 @@ async function resumeActiveStream(sessionId = conversationId) {
         updateSendButton();
         setEmptyChatLayout(false);
         chatActions.hidden = false;
+        if (chatMoreButton) chatMoreButton.hidden = isTempChat;
     }
     try {
         await watchAssistantStream(
@@ -784,7 +920,7 @@ function loadHistory(sessionId, messageContainer) {
 }
 
 async function switchSession(sessionId) {
-    if (typeof sessionId !== 'string' || !sessionId || sessionId === conversationId) return;
+    if (isTempChat) setTempChatMode(false);
     const sequence = ++switchSequence;
     sessionDrafts.set(conversationId, input.value);
     conversationId = sessionId;
@@ -802,8 +938,15 @@ async function switchSession(sessionId) {
     }
     const cachedIsEmpty = messagesElement.childElementCount === 0;
     welcomeElement.hidden = !cachedIsEmpty;
-    chatActions.hidden = cachedIsEmpty;
+    chatActions.hidden = false;
+    if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(nextMessages);
     setEmptyChatLayout(cachedIsEmpty);
+
+    // Reset welcome text to random message when switching to empty session
+    if (cachedIsEmpty && !isTempChat) {
+        document.getElementById('welcome-text').textContent = WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)];
+        document.getElementById('welcome-subtitle').hidden = true;
+    }
 
     input.value = sessionDrafts.get(sessionId) || '';
     selectedTools = [];
@@ -829,7 +972,8 @@ async function switchSession(sessionId) {
 
     isEmpty = messagesElement.childElementCount === 0;
     welcomeElement.hidden = !isEmpty;
-    chatActions.hidden = isEmpty;
+    chatActions.hidden = false;
+    if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
     setEmptyChatLayout(isEmpty);
     historyLoadingElement.hidden = true;
     updateSendButton();
@@ -881,7 +1025,11 @@ Promise.all([
         if (conversationId !== initialSessionId) return;
         updateSendButton();
         setEmptyChatLayout(isEmpty);
-        chatActions.hidden = isEmpty;
+        chatActions.hidden = false;
+        if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
+        if (isEmpty && !isTempChat) {
+            document.getElementById('welcome-text').textContent = WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)];
+        }
         await resumeActiveStream();
     }).catch(error => {
         if (conversationId !== initialSessionId) return;

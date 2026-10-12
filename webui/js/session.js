@@ -44,6 +44,11 @@ export async function loadSessionHistory({
     scrollToLatest,
     messageContainer = messagesElement,
 }) {
+    if (typeof sessionId === 'string' && sessionId.startsWith('temp-')) {
+        messageContainer.replaceChildren();
+        if (welcomeElement) welcomeElement.hidden = false;
+        return true;
+    }
     try {
         const { messages } = await api(`/api/history?conversationId=${encodeURIComponent(sessionId)}`);
         messageContainer.replaceChildren();

@@ -412,12 +412,23 @@ function createMarkdownRenderer() {
 let markdownRenderer;
 
 export function renderMessageContent(container, source) {
-    container.replaceChildren();
-    if (source === null || source === undefined) return;
+    if (source === null || source === undefined) {
+        if (container.hasChildNodes()) container.replaceChildren();
+        container._renderedMarkdown = '';
+        return;
+    }
     const markdown = String(source);
-    if (!markdown.trim()) return;
+    if (!markdown.trim()) {
+        if (container.hasChildNodes()) container.replaceChildren();
+        container._renderedMarkdown = '';
+        return;
+    }
+    if (container._renderedMarkdown === markdown) {
+        return;
+    }
+    container._renderedMarkdown = markdown;
 
     if (!markdownRenderer) markdownRenderer = createMarkdownRenderer();
-    const html = markdownRenderer.render(markdown);
-    container.innerHTML = sanitizeHtml(html);
+    const html = sanitizeHtml(markdownRenderer.render(markdown));
+    container.innerHTML = html;
 }

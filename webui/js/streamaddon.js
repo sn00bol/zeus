@@ -59,12 +59,10 @@ export function renderStreamDetails(container, details) {
     if (Array.isArray(details.sources)) {
         const sourceFooter = document.createElement('footer');
         sourceFooter.className = 'source-footer';
-        const label = document.createElement('span');
-        label.className = 'source-footer-label';
-        label.textContent = 'Sources';
         const sources = document.createElement('div');
         sources.className = 'source-pills';
         const seenUrls = new Set();
+        let pillIndex = 0;
         for (const source of details.sources) {
             if (!source || typeof source.url !== 'string') continue;
             let url;
@@ -83,12 +81,17 @@ export function renderStreamDetails(container, details) {
             pill.href = url.href;
             pill.target = '_blank';
             pill.rel = 'noopener noreferrer';
+            pill.style.setProperty('--pill-index', String(pillIndex++));
             const title = typeof source.title === 'string' && source.title.trim()
                 ? source.title.trim()
                 : hostname;
-            pill.title = title;
+            pill.title = `${title}\n${url.href}`;
             pill.setAttribute('aria-label', `Open source: ${title}`);
-            pill.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.25"></circle><path d="M1.9 8h12.2M8 1.75c1.65 1.7 2.45 3.78 2.45 6.25S9.65 12.55 8 14.25C6.35 12.55 5.55 10.47 5.55 8S6.35 3.45 8 1.75Z"></path></svg>';
+
+            const iconWrap = document.createElement('span');
+            iconWrap.className = 'source-pill-favicon-wrap';
+            iconWrap.innerHTML = '<svg class="source-pill-globe" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.25"></circle><path d="M1.9 8h12.2M8 1.75c1.65 1.7 2.45 3.78 2.45 6.25S9.65 12.55 8 14.25C6.35 12.55 5.55 10.47 5.55 8S6.35 3.45 8 1.75Z"></path></svg>';
+
             const icon = document.createElement('img');
             icon.className = 'source-pill-icon';
             icon.src = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`;
@@ -105,14 +108,25 @@ export function renderStreamDetails(container, details) {
                 pill.dataset.hasFavicon = 'false';
                 icon.remove();
             });
-            pill.append(icon);
+            iconWrap.append(icon);
+
             const linkLabel = document.createElement('span');
+            linkLabel.className = 'source-pill-title';
             linkLabel.textContent = title;
-            pill.append(linkLabel);
+
+            const domainLabel = document.createElement('span');
+            domainLabel.className = 'source-pill-domain';
+            domainLabel.textContent = hostname;
+
+            const arrowIcon = document.createElement('span');
+            arrowIcon.className = 'source-pill-arrow';
+            arrowIcon.innerHTML = '<svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12 12 4M6 4h6v6"/></svg>';
+
+            pill.append(iconWrap, linkLabel, domainLabel, arrowIcon);
             sources.append(pill);
         }
         if (sources.childElementCount) {
-            sourceFooter.append(label, sources);
+            sourceFooter.append(sources);
             container.append(sourceFooter);
         }
     }
