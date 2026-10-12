@@ -14,6 +14,13 @@ The separate `conversation_memories` table stores user-scoped relevant
 question/answer pairs with a 30-day sliding expiry; expired rows are removed by
 the Python bridge lifecycle service.
 
+Curated or explicitly extracted user facts are stored separately in
+`extracted_memories`; they are not inferred from or mixed with raw conversation
+turns. Both stores are scoped by platform and user, share the configured
+retention period, and are removed by the same forget operation. NumPy is an
+optional `search` extra and is used only for vector similarity; embedding
+generation requires a separately configured provider.
+
 Conversation messages are stored as JSONB with a platform-neutral JSON payload
 so another platform can reuse the same history format. Export and import with
 `node database/history.js export [file.json] [platform]` or

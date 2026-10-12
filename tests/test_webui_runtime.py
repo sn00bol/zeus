@@ -8,13 +8,11 @@ from unittest.mock import AsyncMock, patch
 
 from core.model import ModelContext
 from router.router import InferenceRequest, Message, Router
-from src.search import SearchResult
+from src.tools.search import SearchResult
 from src.trace import TraceRecord, decode_trace, encode_trace
-from src.browser_loop import BrowserLoop
 from src.browser_obs import BrowserObservation, BrowserReference
 from src.memory_provider import MemoryProvider
-from src.process import ProcessSupervisor
-from src.runner import StreamRunner
+from vendor.worker import BrowserLoop, ProcessSupervisor, StreamRunner
 
 
 class StreamRunnerTests(unittest.IsolatedAsyncioTestCase):
@@ -45,6 +43,40 @@ class StreamRunnerTests(unittest.IsolatedAsyncioTestCase):
         replay = [item async for item in runner.events(stream_id)]
         self.assertEqual([item.event for item in replay], ["ui_control", "delta", "done"])
         self.assertEqual([item.event_id for item in replay], [1, 2, 3])
+        await runner.stop()
+
+    async def test_generator_drain_survives_disconnect_and_replays_from_cursor(self) -> None:
+        runner = StreamRunner()
+        release = asyncio.Event()
+        started = asyncio.Event()
+
+        async def generator() -> object:
+            started.set()
+            yield "delta", {"text": "first"}
+            await release.wait()
+            yield "delta", {"text": "second"}
+            yield "done", {"message": {"content": "complete"}}
+
+        stream_id = runner.start_generator("conversation-generator", generator())
+        await started.wait()
+        first_subscriber = runner.events(stream_id)
+        self.assertEqual((await anext(first_subscriber)).event, "ui_control")
+        self.assertEqual((await anext(first_subscriber)).data["text"], "first")
+        await first_subscriber.aclose()
+
+        second_subscriber = runner.events(stream_id, after_event_id=1)
+        release.set()
+        replay = [event async for event in second_subscriber]
+        self.assertEqual(
+            [(event.event, event.data.get("text")) for event in replay],
+            [("delta", "first"), ("delta", "second"), ("done", None)],
+        )
+        await runner.stop()
+
+    async def test_replay_rejects_negative_cursor(self) -> None:
+        runner = StreamRunner()
+        with self.assertRaises(ValueError):
+            runner.events("unknown", after_event_id=-1)
         await runner.stop()
 
     async def test_replay_buffer_is_bounded(self) -> None:
@@ -107,6 +139,61 @@ class BrowserLoopTests(unittest.IsolatedAsyncioTestCase):
         await loop.shutdown()
         self.assertEqual(closed, ["first", "second"])
 
+    async def test_browser_loop_runs_health_monitor_until_webui_shutdown(self) -> None:
+        closed: list[str] = []
+        checks = asyncio.Event()
+
+        class Session:
+            alive = True
+
+            async def is_alive(self) -> bool:
+                checks.set()
+                return self.alive
+
+            async def close(self) -> None:
+                closed.append("session")
+
+        session = Session()
+
+        async def factory(_: str) -> Session:
+            return session
+
+        loop = BrowserLoop(factory, check_interval=0.01)
+        await loop.start()
+        self.assertTrue(loop.running)
+        await loop.get("webui-session")
+        await asyncio.wait_for(checks.wait(), timeout=0.2)
+        session.alive = False
+        checks.clear()
+        await asyncio.wait_for(checks.wait(), timeout=0.2)
+        await asyncio.sleep(0)
+        self.assertEqual(closed, ["session"])
+        await loop.shutdown()
+        self.assertFalse(loop.running)
+
+    async def test_browser_loop_applies_lru_eviction_and_rejects_empty_identity(self) -> None:
+        closed: list[str] = []
+
+        class Session:
+            def __init__(self, session_id: str) -> None:
+                self.session_id = session_id
+
+            async def close(self) -> None:
+                closed.append(self.session_id)
+
+        async def factory(session_id: str) -> Session:
+            return Session(session_id)
+
+        loop = BrowserLoop(factory, max_sessions=2)
+        with self.assertRaises(ValueError):
+            await loop.get(" ")
+        await loop.get("a")
+        await loop.get("b")
+        await loop.get("a")
+        await loop.get("c")
+        self.assertEqual(closed, ["b"])
+        await loop.shutdown()
+
 
 class SupportingServicesTests(unittest.IsolatedAsyncioTestCase):
     async def test_memory_provider_uses_the_shared_memory_store(self) -> None:
@@ -126,9 +213,45 @@ class SupportingServicesTests(unittest.IsolatedAsyncioTestCase):
     async def test_process_supervisor_stops_owned_child_processes(self) -> None:
         supervisor = ProcessSupervisor(terminate_timeout=1)
         child = await supervisor.start("short-lived", [sys.executable, "-c", "pass"])
+        self.assertGreater(child.pid, 0)
         await child.process.wait()
+        self.assertFalse(await supervisor.is_alive(child))
         await supervisor.stop_all()
         self.assertEqual(child.process.returncode, 0)
+
+    async def test_process_supervisor_signals_and_verifies_child_death(self) -> None:
+        supervisor = ProcessSupervisor(terminate_timeout=0.5, kill_timeout=1)
+        child = await supervisor.start("sleeping", [sys.executable, "-c", "import time; time.sleep(30)"])
+
+        self.assertTrue(await supervisor.is_alive(child))
+        self.assertTrue(await supervisor.signal("sleeping", "terminate"))
+        returncode = await supervisor.wait("sleeping", timeout=2)
+
+        self.assertIsNotNone(returncode)
+        self.assertFalse(await supervisor.is_alive(child))
+        await supervisor.stop("sleeping")
+
+    async def test_process_supervisor_reconciles_orphans_from_previous_run(self) -> None:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temporary:
+            registry = Path(temporary) / "processes.json"
+            previous = ProcessSupervisor(registry_path=registry, terminate_timeout=1)
+            child = await previous.start(
+                "orphan",
+                [sys.executable, "-c", "import time; time.sleep(30)"],
+            )
+            try:
+                current = ProcessSupervisor(registry_path=registry, terminate_timeout=1)
+
+                report = await current.initialize()
+                await asyncio.wait_for(child.process.wait(), timeout=2)
+
+                self.assertEqual(report.terminated, (child.pid,))
+                self.assertFalse(await previous.is_alive(child))
+            finally:
+                await previous.stop_all()
 
 
 class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
@@ -492,14 +615,17 @@ class RouterSearchPlannerTests(unittest.IsolatedAsyncioTestCase):
         router = Router.__new__(Router)
         router.model_manager = manager
         request = InferenceRequest(
-            messages=[Message(role="user", content="What happened in the latest release?")],
+            messages=[Message(
+                role="user",
+                content="Explain the data returned by the SearXNG result schema.",
+            )],
             platform="discord",
         )
         planner_call = AsyncMock(return_value={
             "choices": [{
                 "message": {
                     "content": (
-                        '{"use_search":true,"query":"latest release notes",'
+                        '{"use_search":true,"query":"SearXNG result schema fields",'
                         '"skill":"search"}'
                     ),
                 },
@@ -515,7 +641,10 @@ class RouterSearchPlannerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIs(planned_context, context)
         self.assertEqual(planned_request.extra["tools"], ["search"])
-        self.assertEqual(planned_request.extra["search_query"], "latest release notes")
+        self.assertEqual(
+            planned_request.extra["search_query"],
+            "SearXNG result schema fields",
+        )
         manager.resolve.assert_awaited_once()
         planner_call.assert_awaited_once()
 

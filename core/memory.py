@@ -24,7 +24,7 @@ _STOP_WORDS = {
 
 
 class MemoryStore:
-    """Store and retrieve relevant conversation turns for an individual user."""
+    """Store conversation turns and explicitly extracted facts in separate tables."""
 
     def __init__(
         self,
@@ -74,13 +74,15 @@ class MemoryStore:
                 log.exception("Could not remove expired conversation memories.")
 
     async def prune_expired(self) -> int:
-        result = await self._database.execute(
-            "DELETE FROM conversation_memories WHERE expires_at <= NOW()"
+        results = await asyncio.gather(
+            self._database.execute(
+                "DELETE FROM conversation_memories WHERE expires_at <= NOW()"
+            ),
+            self._database.execute(
+                "DELETE FROM extracted_memories WHERE expires_at <= NOW()"
+            ),
         )
-        try:
-            return int(result.rsplit(" ", 1)[-1])
-        except (ValueError, IndexError):
-            return 0
+        return sum(_affected_rows(result) for result in results)
 
     async def remember_turn(
         self,
@@ -149,16 +151,85 @@ class MemoryStore:
         ranked = sorted(records, key=lambda record: float(record["relevance"]), reverse=True)
         return [str(record["content"]) for record in ranked]
 
+    async def remember_fact(
+        self,
+        *,
+        platform: str,
+        user_id: str,
+        content: str,
+    ) -> bool:
+        """Persist an explicitly extracted fact separately from conversation turns."""
+        _validate_identity(platform, user_id)
+        content = content.strip()
+        if not content:
+            return False
+        content = content[:_MAX_ANSWER_LENGTH]
+        result = await self._database.fetchrow("""
+            INSERT INTO extracted_memories
+                (platform, user_id, content, expires_at)
+            VALUES ($1, $2, $3, NOW() + ($4::integer * INTERVAL '1 day'))
+            RETURNING memory_id
+        """, platform.strip().lower(), user_id.strip(), content, self._retention_days)
+        return result is not None
+
+    async def retrieve_facts(
+        self,
+        *,
+        platform: str,
+        user_id: str,
+        query: str,
+    ) -> list[str]:
+        """Retrieve curated facts without mixing them with raw conversation history."""
+        _validate_identity(platform, user_id)
+        terms = [
+            token.lower() for token in _TOKEN_PATTERN.findall(query)
+            if token.lower() not in _STOP_WORDS and len(token) > 1
+        ][:12]
+        if not terms:
+            return []
+
+        records = await self._database.fetch("""
+            WITH candidates AS (
+                SELECT memory_id, content,
+                       ts_rank(search_vector, to_tsquery('simple', $3)) AS relevance
+                FROM extracted_memories
+                WHERE platform = $1 AND user_id = $2
+                  AND expires_at > NOW()
+                  AND search_vector @@ to_tsquery('simple', $3)
+                ORDER BY relevance DESC, updated_at DESC
+                LIMIT $4
+            )
+            UPDATE extracted_memories AS memory
+            SET expires_at = NOW() + ($5::integer * INTERVAL '1 day'),
+                updated_at = NOW()
+            FROM candidates
+            WHERE memory.memory_id = candidates.memory_id
+            RETURNING candidates.content, candidates.relevance
+        """, platform.strip().lower(), user_id.strip(), " | ".join(terms),
+            self._max_results, self._retention_days)
+        ranked = sorted(records, key=lambda record: float(record["relevance"]), reverse=True)
+        return [str(record["content"]) for record in ranked]
+
     async def forget_user(self, *, platform: str, user_id: str) -> int:
         _validate_identity(platform, user_id)
-        result = await self._database.execute("""
-            DELETE FROM conversation_memories
-            WHERE platform = $1 AND user_id = $2
-        """, platform.strip().lower(), user_id.strip())
-        try:
-            return int(result.rsplit(" ", 1)[-1])
-        except (ValueError, IndexError):
-            return 0
+        results = await asyncio.gather(
+            self._database.execute("""
+                DELETE FROM conversation_memories
+                WHERE platform = $1 AND user_id = $2
+            """, platform.strip().lower(), user_id.strip()),
+            self._database.execute("""
+                DELETE FROM extracted_memories
+                WHERE platform = $1 AND user_id = $2
+            """, platform.strip().lower(), user_id.strip()),
+        )
+        return sum(_affected_rows(result) for result in results)
+
+
+def _affected_rows(result: str) -> int:
+    try:
+        return int(result.rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _validate_identity(platform: str, user_id: str, conversation_id: str | None = None) -> None:

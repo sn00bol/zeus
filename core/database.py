@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +62,8 @@ class InMemoryDatabasePool:
         self._session_counter = 1
         self._messages: list[InMemoryRecord] = []
         self._memories: list[InMemoryRecord] = []
+        self._facts: list[InMemoryRecord] = []
+        self._memory_counter = 1
         self._model_prefs: dict[str, InMemoryRecord] = {}
         self._user_settings: dict[tuple[str, str], bool] = {}
         self._help_prefs: dict[str, Any] = {}
@@ -85,10 +87,24 @@ class InMemoryDatabasePool:
                     if not (m["platform"] == plat and m["conversation_id"] == conv)
                 ]
                 return "DELETE"
-            if "DELETE FROM CONVERSATION_MEMORIES" in q:
+            if (
+                "DELETE FROM CONVERSATION_MEMORIES" in q
+                or "DELETE FROM EXTRACTED_MEMORIES" in q
+            ):
                 now = datetime.now(timezone.utc)
-                self._memories = [m for m in self._memories if m.get("expires_at", now) > now]
-                return "DELETE"
+                collection = self._facts if "EXTRACTED_MEMORIES" in q else self._memories
+                previous_count = len(collection)
+                if "WHERE PLATFORM = $1 AND USER_ID = $2" in q and len(args) >= 2:
+                    platform, user_id = str(args[0]), str(args[1])
+                    collection[:] = [
+                        item for item in collection
+                        if not (item["platform"] == platform and item["user_id"] == user_id)
+                    ]
+                else:
+                    collection[:] = [
+                        item for item in collection if item.get("expires_at", now) > now
+                    ]
+                return f"DELETE {previous_count - len(collection)}"
             return "OK"
 
     async def fetchrow(self, query: str, *args: object) -> InMemoryRecord | None:
@@ -99,6 +115,27 @@ class InMemoryDatabasePool:
             # Health check ping
             if upper_q.rstrip("; ") == "SELECT 1":
                 return InMemoryRecord({"val": 1})
+
+            if "INSERT INTO CONVERSATION_MEMORIES" in upper_q and len(args) >= 5:
+                platform, user_id, conversation_id, content, retention_days = args[:5]
+                return self._insert_memory(
+                    self._memories,
+                    platform=str(platform),
+                    user_id=str(user_id),
+                    content=str(content),
+                    retention_days=int(retention_days),
+                    conversation_id=str(conversation_id),
+                )
+
+            if "INSERT INTO EXTRACTED_MEMORIES" in upper_q and len(args) >= 4:
+                platform, user_id, content, retention_days = args[:4]
+                return self._insert_memory(
+                    self._facts,
+                    platform=str(platform),
+                    user_id=str(user_id),
+                    content=str(content),
+                    retention_days=int(retention_days),
+                )
 
             # chat_messages WITH inserted AS ... session_upsert ...
             if ("WITH INSERTED AS" in upper_q or "INSERT INTO CHAT_MESSAGES" in upper_q) and len(args) >= 6:
@@ -214,17 +251,62 @@ class InMemoryDatabasePool:
                 matched.sort(key=lambda m: m["created_at"], reverse=True)
                 return [InMemoryRecord({"payload": m["payload"]}) for m in matched[:limit]]
 
-            # conversation_memories get
-            if "FROM CONVERSATION_MEMORIES" in upper_q and len(args) >= 2:
+            # User-scoped conversation turns and extracted facts remain separate.
+            if (
+                ("FROM CONVERSATION_MEMORIES" in upper_q
+                 or "FROM EXTRACTED_MEMORIES" in upper_q)
+                and len(args) >= 2
+            ):
                 plat, user_id = str(args[0]), str(args[1])
                 now = datetime.now(timezone.utc)
-                res: list[InMemoryRecord] = []
-                for m in self._memories:
-                    if m["platform"] == plat and m["user_id"] == user_id and m.get("expires_at", now) > now:
-                        res.append(InMemoryRecord({"content": m["content"]}))
-                return res
+                collection = self._facts if "EXTRACTED_MEMORIES" in upper_q else self._memories
+                query_terms = {
+                    term.casefold() for term in str(args[2]).split(" | ")
+                } if len(args) > 2 else set()
+                limit = int(args[3]) if len(args) > 3 else len(collection)
+                matched: list[tuple[int, InMemoryRecord]] = []
+                for item in collection:
+                    if (
+                        item["platform"] != plat
+                        or item["user_id"] != user_id
+                        or item.get("expires_at", now) <= now
+                    ):
+                        continue
+                    content = str(item["content"])
+                    score = sum(term in content.casefold() for term in query_terms)
+                    if query_terms and score == 0:
+                        continue
+                    matched.append((score, InMemoryRecord({
+                        "content": content,
+                        "relevance": float(score),
+                    })))
+                matched.sort(key=lambda item: item[0], reverse=True)
+                return [record for _, record in matched[:limit]]
 
             return []
+
+    def _insert_memory(
+        self,
+        collection: list[InMemoryRecord],
+        *,
+        platform: str,
+        user_id: str,
+        content: str,
+        retention_days: int,
+        conversation_id: str = "",
+    ) -> InMemoryRecord:
+        expires_at = datetime.now(timezone.utc) + timedelta(days=retention_days)
+        memory_id = self._memory_counter
+        self._memory_counter += 1
+        collection.append(InMemoryRecord({
+            "memory_id": memory_id,
+            "platform": platform,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "content": content,
+            "expires_at": expires_at,
+        }))
+        return InMemoryRecord({"memory_id": memory_id})
 
 
 class DatabaseRouter:

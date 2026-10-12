@@ -8,7 +8,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, AsyncIterator
+from typing import Any, AsyncIterable, Awaitable, Callable, AsyncIterator
 from uuid import uuid4
 
 log = logging.getLogger(__name__)
@@ -68,6 +68,8 @@ class StreamRunner:
     def start(self, session_id: str, work: StreamWork) -> str:
         if self._closed:
             raise RuntimeError("The stream runner is shutting down.")
+        if not session_id.strip():
+            raise ValueError("A stream session ID is required.")
         self.prune()
         if len(self._streams) >= self.max_streams:
             completed = [
@@ -92,6 +94,19 @@ class StreamRunner:
         )
         return stream_id
 
+    def start_generator(
+        self,
+        session_id: str,
+        generator: AsyncIterable[tuple[str, dict[str, Any]]],
+    ) -> str:
+        """Drain a stream generator independently of any SSE subscriber."""
+
+        async def drain(publish: Callable[[str, dict[str, Any]], None]) -> None:
+            async for event, data in generator:
+                publish(event, data)
+
+        return self.start(session_id, drain)
+
     async def _drain(self, stream: _Stream, work: StreamWork) -> None:
         def publish(event: str, data: dict[str, Any]) -> None:
             self._publish(stream, event, data)
@@ -99,6 +114,11 @@ class StreamRunner:
         try:
             await work(publish)
         except asyncio.CancelledError:
+            try:
+                publish("ui_control", {"state": "cancelled"})
+                publish("stream_error", {"message": "The server stopped this stream."})
+            except ValueError:
+                log.warning("Could not record cancellation for an oversized stream buffer.")
             raise
         except Exception as exc:
             log.exception("Background WebUI stream for session %s failed.", stream.session_id)
@@ -146,6 +166,8 @@ class StreamRunner:
         *,
         after_event_id: int = 0,
     ) -> AsyncIterator[StreamEvent]:
+        if after_event_id < 0:
+            raise ValueError("The replay cursor cannot be negative.")
         self.prune()
         stream = self._streams.get(stream_id)
         if stream is None:
@@ -180,7 +202,13 @@ class StreamRunner:
         for task in tasks:
             task.cancel()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            errors = [
+                result for result in results
+                if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError)
+            ]
+            if errors:
+                raise RuntimeError(f"Could not stop {len(errors)} stream task(s).") from errors[0]
 
     def prune(self, now: float | None = None) -> None:
         current = time.monotonic() if now is None else now

@@ -103,6 +103,31 @@ relevance check appear as compact source pills below the answer; if screening
 fails, unrelated result links are withheld. SearXNG aggregates results from its
 configured engines.
 
+The selected model plans web search automatically across supported providers;
+`@search` remains available to force a lookup. Retrieval always evaluates
+first-pass relevance, query-term coverage, and result count, then allows a
+focused follow-up only when result quality is weak. Result-count, quality, and
+resource limits are managed by `SearchConfig`. Embedding generation is a
+separate provider integration; NumPy only performs vector similarity. Install
+the optional vector dependency with `pip install ".[search]"` when using
+`vendor.search.vector`.
+
+Conversation turns and explicitly extracted user facts are stored separately.
+Extracted facts are not generated automatically; callers must supply content to
+the fact API. Both stores remain isolated by platform and user and are removed
+by the same forget operation.
+
+The reusable worker layer offers a long-running browser-session monitor for
+the WebUI ASGI lifespan. Applications with a configured browser-session factory
+can inject it via `create_app(browser_loop=...)`; startup begins monitoring and
+shutdown closes owned sessions. Process supervisors support stable
+`registry_path` manifests for startup orphan reconciliation; call
+`await supervisor.initialize()` to reconcile before launching managed work
+(also done automatically before the first `start`). Streams remain owned by
+the server task when an SSE subscriber disconnects. Replay buffers are bounded;
+if a reconnect cursor predates retained events, the server emits `replay_gap`
+and the terminal `done` event carries the persisted full assistant response.
+
 ## Check startup and logs
 
 ```bash

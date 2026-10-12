@@ -1,9 +1,59 @@
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const http = require('node:http');
 const test = require('node:test');
 
 const { conversationTitleFromPrompt, createWebUiServer } = require('../webui/app');
 const { StreamManager } = require('../webui/streamManager');
+
+test('server-side streams outlive SSE subscribers and replay bounded buffered events', async () => {
+    const manager = new StreamManager({
+        maxEventsPerStream: 2,
+        maxBufferBytesPerStream: 1_024,
+    });
+    let release;
+    let persisted = false;
+    let runs = 0;
+    const streamId = manager.start(async publish => {
+        runs += 1;
+        publish('delta', { text: 'first' });
+        await new Promise(resolve => { release = resolve; });
+        publish('delta', { text: 'second' });
+        persisted = true;
+        publish('done', { message: { content: 'firstsecond' } });
+    }, 'conversation-replay');
+
+    await new Promise(resolve => setImmediate(resolve));
+    const firstResponse = new EventEmitter();
+    firstResponse.destroyed = false;
+    firstResponse.writableEnded = false;
+    firstResponse.events = [];
+    firstResponse.write = value => firstResponse.events.push(value);
+    firstResponse.end = () => { firstResponse.writableEnded = true; };
+    firstResponse.destroy = error => { throw error; };
+    manager.subscribe(streamId, firstResponse);
+    assert.match(firstResponse.events.join(''), /event: delta\ndata: {"text":"first"}/);
+    firstResponse.emit('close');
+    assert.equal(manager.streams.get(streamId).listeners.size, 0);
+    release();
+    await manager.streams.get(streamId).task;
+
+    const reconnect = new EventEmitter();
+    reconnect.destroyed = false;
+    reconnect.writableEnded = false;
+    reconnect.events = [];
+    reconnect.write = value => reconnect.events.push(value);
+    reconnect.end = () => { reconnect.writableEnded = true; };
+    reconnect.destroy = error => { throw error; };
+    manager.subscribe(streamId, reconnect);
+
+    const replay = reconnect.events.join('');
+    assert.match(replay, /event: replay_gap/);
+    assert.match(replay, /event: delta\ndata: {"text":"second"}/);
+    assert.match(replay, /event: done\ndata: {"message":{"content":"firstsecond"}}/);
+    assert.equal(persisted, true);
+    assert.equal(runs, 1);
+});
 
 test('conversation titles are immediate and concise for long prompts', () => {
     assert.equal(conversationTitleFromPrompt('hỏi thời tiết hôm nay'), 'Hỏi thời tiết hôm nay');

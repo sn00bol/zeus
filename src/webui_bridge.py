@@ -20,6 +20,7 @@ from core.database import DatabaseRouter
 from core.memory import MemoryStore
 from core.session_manager import SessionManager
 from router.router import InferenceRequest, Message, Router
+from vendor.worker.browser import BrowserLoop
 
 log = logging.getLogger("webui_bridge")
 _BRIDGE_HOST = os.environ.get("WEBUI_BRIDGE_HOST", "127.0.0.1")
@@ -72,6 +73,9 @@ async def _send_json(send: Any, data: Any, status: int = 200) -> None:
 
 
 class WebUiBridge:
+    def __init__(self, *, browser_loop: BrowserLoop | None = None) -> None:
+        self._browser_loop = browser_loop
+
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope["type"] == "lifespan":
             await self._lifespan(receive, send)
@@ -84,8 +88,12 @@ class WebUiBridge:
             if event["type"] == "lifespan.startup":
                 await _database.initialize()
                 await _memory_store.start()
+                if self._browser_loop is not None:
+                    await self._browser_loop.start()
                 await send({"type": "lifespan.startup.complete"})
             elif event["type"] == "lifespan.shutdown":
+                if self._browser_loop is not None:
+                    await self._browser_loop.shutdown()
                 await _session_manager.shutdown()
                 await _memory_store.stop()
                 await _database.close()
@@ -239,8 +247,8 @@ async def _stream_inference(request: InferenceRequest, send: Any) -> None:
         await send({"type": "http.response.body", "body": b"", "more_body": False})
 
 
-def create_app() -> WebUiBridge:
-    return WebUiBridge()
+def create_app(*, browser_loop: BrowserLoop | None = None) -> WebUiBridge:
+    return WebUiBridge(browser_loop=browser_loop)
 
 
 def main() -> None:

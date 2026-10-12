@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from src import webui_bridge
 
@@ -41,6 +41,53 @@ def response_json(events: list[dict[str, object]]) -> dict[str, object]:
 
 
 class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browser_loop_is_started_and_stopped_with_webui_lifespan(self) -> None:
+        class Loop:
+            started = False
+            stopped = False
+
+            async def start(self) -> None:
+                self.started = True
+
+            async def shutdown(self) -> None:
+                self.stopped = True
+
+        loop = Loop()
+        receive_events = iter([
+            {"type": "lifespan.startup"},
+            {"type": "lifespan.shutdown"},
+        ])
+        sent: list[dict[str, object]] = []
+
+        async def receive() -> dict[str, object]:
+            return next(receive_events)
+
+        async def send(event: dict[str, object]) -> None:
+            sent.append(event)
+
+        with (
+            patch.object(webui_bridge, "_database") as database,
+            patch.object(webui_bridge, "_memory_store") as memory,
+            patch.object(webui_bridge, "_session_manager") as sessions,
+        ):
+            database.initialize = AsyncMock()
+            database.close = AsyncMock()
+            memory.start = AsyncMock()
+            memory.stop = AsyncMock()
+            sessions.shutdown = AsyncMock()
+            await webui_bridge.create_app(browser_loop=loop)(
+                {"type": "lifespan"},
+                receive,
+                send,
+            )
+
+        self.assertTrue(loop.started)
+        self.assertTrue(loop.stopped)
+        self.assertEqual(
+            [event["type"] for event in sent],
+            ["lifespan.startup.complete", "lifespan.shutdown.complete"],
+        )
+
     async def test_health_endpoint_is_independent_of_platform_bridge(self) -> None:
         response = await call_asgi(webui_bridge.create_app(), "GET", "/health")
         self.assertEqual(response[0]["status"], 200)

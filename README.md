@@ -17,7 +17,7 @@
 ## Features (DEMO)
 - **Literrally a chatbot** — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
 - **Analysis documents** — Support writing, spelling error checks, suggestion and basic Text Editor
-- **Searching with SearXNG** — Support built in searXNG and Deep research, optimize result and speed (Auto-search are only work some models, another have to use @search to make it work)
+- **Searching with SearXNG** — Automatically decides when live web evidence is useful, adapts follow-up retrieval to result quality, and supports deep research. Use `@search` to force a lookup.
 - **Smart database** — Saving your history chat and your custom skill to make your personal AI Agents
 
 ## Quick start

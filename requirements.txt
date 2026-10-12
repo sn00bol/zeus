@@ -3,3 +3,4 @@ httpcore
 uvicorn
 python-dotenv
 asyncpg
+numpy

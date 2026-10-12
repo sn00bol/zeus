@@ -36,7 +36,7 @@ from core.memory import MemoryStore
 from core.session import Session
 from core.session_manager import SessionManager
 from src.provider import BaseProvider
-from src.search import (
+from src.tools.search import (
     SEARCH_INTENT_PROMPT,
     SEARCH_RELEVANCE_PROMPT,
     SearchDecision,
@@ -44,6 +44,7 @@ from src.search import (
     parse_search_decision,
     parse_search_relevance,
 )
+from vendor.search.config import SearchConfig
 
 from router.broker import EventBroker, get_event_broker
 from router.dispatcher import (
@@ -144,10 +145,19 @@ class Router:
         dispatcher: DynamicDispatcher | None = None,
         health_monitor: HealthMonitor | None = None,
         security_manager: SecurityManager | None = None,
+        search_config: SearchConfig | None = None,
     ) -> None:
         self.memory_store = memory_store
         self.session_manager = session_manager
-        self.model_manager = model_manager or ModelManager(memory_store=memory_store)
+        self.model_manager = model_manager or ModelManager(
+            memory_store=memory_store,
+            search_config=search_config,
+        )
+        self._search_config = (
+            search_config
+            or getattr(self.model_manager, "search_config", None)
+            or SearchConfig()
+        )
         self.broker = broker or get_event_broker()
         self.dispatcher = dispatcher or DynamicDispatcher(self.model_manager, broker=self.broker)
         self.health_monitor = health_monitor or get_health_monitor(
@@ -222,54 +232,53 @@ class Router:
             )
         else:
             search_question = latest_question
-        planner_input = json.dumps(
-            {
-                "search_selected_by_user": explicit_search,
-                "conversation": [
-                    {
-                        "role": message["role"],
-                        "content": message["content"][-4000:],
-                    }
-                    for message in messages
-                ],
-            },
-            ensure_ascii=False,
-        )
+        if explicit_search:
+            decision = SearchDecision(True, search_question, "search")
+        else:
+            planner_input = json.dumps(
+                {
+                    "search_selected_by_user": explicit_search,
+                    "conversation": [
+                        {
+                            "role": message["role"],
+                            "content": message["content"][-4000:],
+                        }
+                        for message in messages
+                    ],
+                },
+                ensure_ascii=False,
+            )
 
-        decision = SearchDecision(
-            use_search=explicit_search,
-            query=search_question,
-            skill="search",
-        )
-        try:
-            planner_response = await self._call_backend(
-                provider=context.provider,
-                model_id=context.model_name,
-                messages=[
-                    {"role": "system", "content": SEARCH_INTENT_PROMPT},
-                    {"role": "user", "content": planner_input},
-                ],
-                temperature=0,
-                max_tokens=160,
-                stream=False,
-                extra={},
-                api_token=context.api_token,
-                client=client,
-                think=False,
-            )
-            choices = planner_response.get("choices")
-            planner_text = ""
-            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-                message = choices[0].get("message")
-                if isinstance(message, dict) and isinstance(message.get("content"), str):
-                    planner_text = message["content"]
-            decision = parse_search_decision(
-                planner_text,
-                fallback_query=search_question,
-                force_search=explicit_search,
-            )
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("AI web-search planning failed (%s).", type(exc).__name__)
+            decision = SearchDecision(False, search_question, "search")
+            try:
+                planner_response = await self._call_backend(
+                    provider=context.provider,
+                    model_id=context.model_name,
+                    messages=[
+                        {"role": "system", "content": SEARCH_INTENT_PROMPT},
+                        {"role": "user", "content": planner_input},
+                    ],
+                    temperature=0,
+                    max_tokens=160,
+                    stream=False,
+                    extra={},
+                    api_token=context.api_token,
+                    client=client,
+                    think=False,
+                )
+                choices = planner_response.get("choices")
+                planner_text = ""
+                if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                    message = choices[0].get("message")
+                    if isinstance(message, dict) and isinstance(message.get("content"), str):
+                        planner_text = message["content"]
+                decision = parse_search_decision(
+                    planner_text,
+                    fallback_query=search_question,
+                    force_search=explicit_search,
+                )
+            except Exception:
+                log.exception("Automatic web-search planning failed.")
 
         if not decision.use_search:
             return request, context
@@ -317,17 +326,22 @@ class Router:
         if not user_messages:
             return context
 
-        candidates = [
-            {
-                "id": index,
-                "title": result.title,
-                "snippet": result.content,
-                "published_date": result.published_date,
-            }
-            for index, result in enumerate(results, start=1)
-        ]
+        search_query = request.extra.get("search_query")
+        if not isinstance(search_query, str) or not search_query.strip():
+            search_query = user_messages[-1]["content"]
+        search_config = getattr(self, "_search_config", SearchConfig())
+
         filtered_results: list[SearchResult] = []
         try:
+            candidates = [
+                {
+                    "id": index,
+                    "title": result.title,
+                    "snippet": result.content,
+                    "published_date": result.published_date,
+                }
+                for index, result in enumerate(results, start=1)
+            ]
             screening_response = await self._call_backend(
                 provider=context.provider,
                 model_id=context.model_name,
@@ -339,6 +353,7 @@ class Router:
                             {
                                 "conversation": conversation,
                                 "search_results": candidates,
+                                "max_results": search_config.max_results,
                             },
                             ensure_ascii=False,
                         ),
@@ -361,13 +376,14 @@ class Router:
             relevant_ids = parse_search_relevance(
                 screening_text,
                 result_count=len(results),
+                limit=search_config.max_results,
             )
             if relevant_ids is None:
                 log.warning("AI web-search relevance screening returned invalid output.")
             else:
                 filtered_results = [results[result_id - 1] for result_id in relevant_ids]
-        except (httpx.HTTPError, ValueError) as exc:
-            log.warning("AI web-search relevance screening failed (%s).", type(exc).__name__)
+        except Exception:
+            log.exception("Automatic web-search relevance screening failed.")
 
         context.search_results = filtered_results
         search_query = request.extra.get("search_query")

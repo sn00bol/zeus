@@ -17,7 +17,7 @@ from core.session_manager import SessionManager
 from router.router import Router
 from src.provider import LlamaCppProvider, LMStudioProvider, ModelInfo, OllamaProvider
 from src.provider.base import ModelLimits
-from src.search import SearchResult
+from src.tools.search import SearchResult
 from src import discord_bridge
 
 
@@ -92,7 +92,7 @@ class FakeMemoryDatabase:
 
     async def execute(self, query: str, *args: object) -> str:
         self.fetch_calls.append((query, args))
-        return "DELETE 2"
+        return "DELETE 2" if "conversation_memories" in query else "DELETE 0"
 
 
 class FakeSearchClient:
@@ -162,7 +162,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
         context = await manager.resolve(request)
 
-        self.assertEqual(search.calls, [(question, 12)])
+        self.assertEqual(search.calls[0], (question, 10))
         research_message = next(
             message
             for message in context.messages
@@ -276,7 +276,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
         await manager.resolve(request)
 
-        self.assertEqual(search.calls, [(question, 12)])
+        self.assertEqual(search.calls[0], (question, 10))
 
     async def test_selected_model_uses_its_own_context_window(self) -> None:
         class DifferentContextProvider(FakeProvider):
@@ -494,10 +494,82 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ZEUS", context.messages[0]["content"])
         self.assertIn("Safety", context.messages[0]["content"])
         self.assertIn("Skill workflow", context.messages[0]["content"])
+        self.assertEqual(context.messages[1]["role"], "user")
         self.assertIn("Relevant memories", context.messages[1]["content"])
         self.assertIn("Discord bot setup", context.messages[1]["content"])
+        self.assertEqual(context.messages[2]["content"], "How do I add a Discord bot command?")
         self.assertEqual(database.fetch_calls[0][1][0:2], ("discord", "private-user"))
         self.assertEqual(database.fetch_calls[0][1][2], "add | discord | bot | command")
+
+    async def test_adaptive_search_retries_only_after_weak_first_pass(self) -> None:
+        class AdaptiveClient:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def search(self, query: str, *, limit: int = 6) -> list[SearchResult]:
+                self.calls.append(query)
+                if len(self.calls) == 1:
+                    return [SearchResult("Unrelated", "https://one.test/", "news", "test")]
+                return [
+                    SearchResult(
+                        "ZEUS asynchronous stream API",
+                        "https://two.test/",
+                        "ZEUS stream API changed its async behavior",
+                        "test",
+                    )
+                ]
+
+        search = AdaptiveClient()
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            search_client=search,
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[SimpleNamespace(
+                role="user",
+                content="What changed in ZEUS asynchronous stream API?",
+            )],
+            extra={"tools": ["search"]},
+            temperature=None,
+            max_tokens=None,
+            session=None,
+        )
+
+        context = await manager.resolve(request)
+
+        self.assertEqual(len(search.calls), 2)
+        self.assertNotEqual(search.calls[0], search.calls[1])
+        self.assertEqual(context.search_results[0].url, "https://two.test/")
+
+    async def test_optional_memory_failure_does_not_block_inference(self) -> None:
+        class UnavailableMemory:
+            async def retrieve(self, **kwargs: str) -> list[str]:
+                raise RuntimeError("unavailable")
+
+        manager = ModelManager(
+            provider_factory=lambda _: FakeProvider(),
+            memory_store=UnavailableMemory(),  # type: ignore[arg-type]
+        )
+        request = SimpleNamespace(
+            provider_name="ollama",
+            model="llama-test",
+            messages=[SimpleNamespace(role="user", content="What is relevant?")],
+            extra={},
+            temperature=None,
+            max_tokens=None,
+            session=SimpleNamespace(
+                platform="discord",
+                user_id="user-1",
+                conversation_id="thread-1",
+            ),
+        )
+
+        context = await manager.resolve(request)
+
+        self.assertEqual(context.model_name, "llama-test")
+        self.assertEqual(context.messages[-1]["content"], "What is relevant?")
 
     async def test_router_sends_optional_provider_token_as_bearer_auth(self) -> None:
         captured: dict[str, object] = {}
@@ -695,6 +767,9 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
         forget_query, forget_args = database.fetch_calls[1]
         self.assertIn("DELETE FROM conversation_memories", forget_query)
         self.assertEqual(forget_args, ("discord", "user-1"))
+        extracted_forget_query, extracted_forget_args = database.fetch_calls[2]
+        self.assertIn("DELETE FROM extracted_memories", extracted_forget_query)
+        self.assertEqual(extracted_forget_args, ("discord", "user-1"))
 
     async def test_bridge_attaches_persistent_session_to_inference_request(self) -> None:
         now = datetime.now(timezone.utc)

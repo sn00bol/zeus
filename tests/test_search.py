@@ -4,7 +4,7 @@ import unittest
 
 import httpx
 
-from src.search import (
+from src.tools.search import (
     SEARCH_INTENT_PROMPT,
     SearXNGSearch,
     parse_search_decision,

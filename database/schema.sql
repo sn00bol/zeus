@@ -70,6 +70,24 @@ CREATE INDEX IF NOT EXISTS idx_conversation_memories_search
 CREATE INDEX IF NOT EXISTS idx_conversation_memories_owner_expiry
     ON conversation_memories (platform, user_id, expires_at);
 
+CREATE TABLE IF NOT EXISTS extracted_memories (
+    memory_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    platform TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    search_vector TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('simple', content)
+    ) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_extracted_memories_search
+    ON extracted_memories USING GIN (search_vector);
+CREATE INDEX IF NOT EXISTS idx_extracted_memories_owner_expiry
+    ON extracted_memories (platform, user_id, expires_at);
+
 CREATE TABLE IF NOT EXISTS model_preferences (
     scope_id TEXT PRIMARY KEY,
     provider_name TEXT,
