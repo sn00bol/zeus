@@ -8,6 +8,7 @@ import {
 } from './streamaddon.js';
 import { startChatStream, watchChatStream } from './stream.js';
 import { loadSessionHistory, getSessionId } from './session.js';
+import { initializeSettings } from './settings.js';
 import { initializeSidebar } from './sidebar.js';
 
 let conversationId = getSessionId();
@@ -48,6 +49,7 @@ let switchSequence = 0;
 let modelChoices = [];
 let modelPreference = null;
 let runtimeModel = null;
+let settings = null;
 let availableTools = [];
 let selectedTools = [];
 let activeToolOption = 0;
@@ -535,7 +537,7 @@ function renderModelMenu() {
         name.textContent = model.model;
         const provider = document.createElement('span');
         provider.className = 'model-option-provider';
-        provider.textContent = model.provider;
+        provider.textContent = model.provider_name || model.provider;
         copy.append(name, provider);
         option.append(copy);
         option.addEventListener('click', () => chooseModel(model));
@@ -551,7 +553,7 @@ function renderModelMenu() {
     }
 }
 
-async function chooseModel(model) {
+async function chooseModel(model, { showError = true } = {}) {
     modelButton.disabled = true;
     try {
         await setModelChoice(conversationId, model);
@@ -560,12 +562,25 @@ async function chooseModel(model) {
         renderModelMenu();
         modelMenu.hidden = true;
         modelButton.setAttribute('aria-expanded', 'false');
+        return true;
     } catch (error) {
-        window.alert(`Could not change the model: ${error.message}`);
+        if (showError) window.alert(`Could not change the model: ${error.message}`);
+        if (!showError) throw error;
+        return false;
     } finally {
         modelButton.disabled = false;
     }
 }
+
+settings = initializeSettings({
+    getConversationId: () => conversationId,
+    loadModels,
+    onSearchSettingChange: enabled => {
+        if (!enabled) selectedTools = selectedTools.filter(name => name !== 'search');
+        renderSelectedTools();
+        renderToolMenu();
+    },
+});
 
 function updateSendButton() {
     const hasInput = Boolean(input.value.trim());
@@ -590,9 +605,12 @@ function visibleTools() {
     const mention = getToolMention();
     if (!mention) return [];
     return availableTools.filter(tool => (
-        tool.name.includes(mention.query)
-        || tool.label.toLowerCase().includes(mention.query)
-        || tool.description.toLowerCase().includes(mention.query)
+        (tool.name !== 'search' || settings?.isSearchEnabled() !== false)
+        && (
+            tool.name.includes(mention.query)
+            || tool.label.toLowerCase().includes(mention.query)
+            || tool.description.toLowerCase().includes(mention.query)
+        )
     ));
 }
 

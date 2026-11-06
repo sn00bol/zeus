@@ -109,6 +109,12 @@ class WebUiBridge:
         if method == "GET" and path == "/models":
             await _send_json(send, {"models": await _router.available_models()})
             return
+        if method == "GET" and path == "/model-catalog":
+            await _send_json(
+                send,
+                {"models": await _router.available_models(include_disabled=True)},
+            )
+            return
         if method == "GET" and path == "/status":
             await _send_json(send, {"model": await _router.model_manager.status()})
             return

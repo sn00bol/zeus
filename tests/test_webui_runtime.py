@@ -255,6 +255,24 @@ class SupportingServicesTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_router_model_catalog_includes_disabled_models(self) -> None:
+        class FakeModelManager:
+            async def available_models(
+                self,
+                *,
+                refresh: bool = False,
+                include_disabled: bool = False,
+            ) -> list[dict[str, object]]:
+                return [{"model": "disabled-model", "enabled": False}] if include_disabled else []
+
+        router = Router(model_manager=FakeModelManager())  # type: ignore[arg-type]
+
+        self.assertEqual(await router.available_models(), [])
+        self.assertEqual(
+            await router.available_models(include_disabled=True),
+            [{"model": "disabled-model", "enabled": False}],
+        )
+
     def test_gpt_oss_thinking_flag_uses_ollama_openai_reasoning_effort(self) -> None:
         provider = SimpleNamespace(name="ollama")
 

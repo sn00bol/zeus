@@ -14,6 +14,7 @@ from typing import Any, Awaitable, Callable
 
 from core.model import ModelManager
 from router.broker import EventBroker, get_event_broker
+from src.provider import detect_supports_thinking
 
 log = logging.getLogger(__name__)
 
@@ -31,17 +32,9 @@ _REASONING_PATTERNS = [
     re.compile(r"\b(suy\s+nghĩ|tại\s+sao|giải\s+thích|phân\s+tích|chứng\s+minh|tính\s+toán|so\s+sánh|kế\s+hoạch|lập\s+luận|hãy\s+nghĩ|bước\s+bước)\b", re.IGNORECASE),
 ]
 
-_REASONING_MODEL_PATTERNS = re.compile(
-    r"\b(r1|qwq|reasoning|thinking|deepseek-r1|deepseek-reasoner)\b|-(?:r1|qwq)\b",
-    re.IGNORECASE,
-)
-
-
 def is_reasoning_model(model_name: str | None) -> bool:
     """Return True if the model name indicates a reasoning-focused model."""
-    if not model_name:
-        return False
-    return bool(_REASONING_MODEL_PATTERNS.search(model_name))
+    return detect_supports_thinking(model_name) if model_name else False
 
 
 

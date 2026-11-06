@@ -16,7 +16,14 @@ from core.memory import MemoryStore
 from core.session import Session, SessionStore
 from core.session_manager import SessionManager
 from router.router import Router
-from src.provider import LlamaCppProvider, LMStudioProvider, ModelInfo, OllamaProvider
+from src.provider import (
+    LlamaCppProvider,
+    LMStudioProvider,
+    ModelInfo,
+    OllamaProvider,
+    detect_supports_thinking,
+    detect_supports_vision,
+)
 from src.provider.base import ModelLimits
 from src.tools.search import SearchResult
 from src import discord_bridge
@@ -114,6 +121,87 @@ class FakeSearchClient:
 
 
 class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
+    def test_model_capability_detection_uses_metadata_and_known_ids(self) -> None:
+        self.assertTrue(detect_supports_vision(
+            "unknown-model",
+            {"input_modalities": ["text", "image"]},
+        ))
+        self.assertFalse(detect_supports_vision(
+            "llava-model",
+            {"supports_vision": False},
+        ))
+        self.assertTrue(detect_supports_thinking(
+            "unknown-model",
+            {"supported_parameters": ["reasoning_effort"]},
+        ))
+        self.assertTrue(detect_supports_thinking("deepseek-r1:latest"))
+        self.assertFalse(detect_supports_thinking("plain-chat-model"))
+
+    async def test_disabled_local_models_remain_in_catalog_and_are_rejected(self) -> None:
+        class AvailableProvider:
+            def __init__(self, name: str) -> None:
+                self.name = name
+                self.endpoint = SimpleNamespace(base_url="http://localhost:11434")
+
+            async def ping(self) -> bool:
+                return self.name == "ollama"
+
+            async def list_models(self) -> list[ModelInfo]:
+                return [ModelInfo(id="local-model"), ModelInfo(id="deleted-model")]
+
+            async def get_model(self, model_id: str) -> ModelInfo | None:
+                return ModelInfo(id=model_id) if model_id in {"local-model", "deleted-model"} else None
+
+        class ControlsDatabase:
+            async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+                if "FROM model_controls" in query:
+                    if "WHERE provider_name = $1 AND enabled = FALSE" in query:
+                        return [{"model_id": "local-model"}, {"model_id": "deleted-model"}]
+                    return [{
+                        "provider_name": "ollama",
+                        "model_id": "local-model",
+                        "enabled": False,
+                        "supports_vision": None,
+                        "supports_thinking": None,
+                    }, {
+                        "provider_name": "ollama",
+                        "model_id": "deleted-model",
+                        "enabled": False,
+                        "deleted": True,
+                    }]
+                return []
+
+            async def fetchrow(
+                self,
+                query: str,
+                *args: object,
+            ) -> dict[str, object] | None:
+                if "FROM model_controls" in query:
+                    return {"enabled": False}
+                return None
+
+        manager = ModelManager(
+            provider_factory=lambda name: AvailableProvider(name),  # type: ignore[arg-type]
+            database=ControlsDatabase(),
+        )
+
+        self.assertEqual(await manager.available_models(), [])
+        catalog = await manager.available_models(include_disabled=True)
+        self.assertEqual(
+            [model["model"] for model in catalog],
+            ["local-model", "deleted-model"],
+        )
+        self.assertFalse(catalog[1]["enabled"])
+        with self.assertRaisesRegex(ValueError, "disabled"):
+            await manager.resolve(SimpleNamespace(
+                provider_name="ollama",
+                model="deleted-model",
+                messages=[SimpleNamespace(role="user", content="hello")],
+                temperature=None,
+                max_tokens=None,
+                session=None,
+            ))
+
     async def test_model_discovery_checks_providers_concurrently(self) -> None:
         names = ("ollama", "lmstudio", "llamacpp")
         providers_started = 0

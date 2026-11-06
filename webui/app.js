@@ -155,7 +155,7 @@ function createWebUiServer({
                 sendStatic(response, path.join(__dirname, 'zeus.ico'), 'image/x-icon');
                 return;
             }
-            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|sidebar|session|theme)\.js$/);
+            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|settings|sidebar|session|theme)\.js$/);
             if (request.method === 'GET' && assetMatch) {
                 sendStatic(
                     response,
@@ -280,6 +280,63 @@ function createWebUiServer({
             }
             if (request.method === 'GET' && url.pathname === '/api/tools') {
                 sendJson(response, 200, { tools: AVAILABLE_TOOLS });
+                return;
+            }
+            const modelControlMatch = url.pathname.match(/^\/api\/model-catalog\/([^/]+)\/([^/]+)$/);
+            if (modelControlMatch && request.method === 'PATCH') {
+                const provider = decodeURIComponent(modelControlMatch[1]);
+                const modelId = decodeURIComponent(modelControlMatch[2]);
+                if (!['ollama', 'lmstudio', 'llamacpp'].includes(provider)) {
+                    throw new HttpError(400, 'Invalid built-in provider.');
+                }
+                if (!modelId || modelId.length > 256) {
+                    throw new HttpError(400, 'Invalid model ID.');
+                }
+                const body = await readJson(request);
+                const allowedFields = [['enabled', 'enabled']];
+                const updates = allowedFields.filter(([input]) => body[input] !== undefined);
+                if (!updates.length) {
+                    throw new HttpError(400, 'Provide the enabled state to update.');
+                }
+                if (updates.some(([input]) => typeof body[input] !== 'boolean')) {
+                    throw new HttpError(400, 'Model settings must be booleans.');
+                }
+                const values = [provider, modelId];
+                const setters = updates.map(([input, column]) => {
+                    values.push(body[input]);
+                    return `${column} = $${values.length}`;
+                });
+                setters.push('updated_at = NOW()');
+                await db.pool.query(`
+                    INSERT INTO model_controls (provider_name, model_id)
+                    VALUES ($1, $2)
+                    ON CONFLICT (provider_name, model_id) DO NOTHING
+                `, [provider, modelId]);
+                await db.pool.query(`
+                    UPDATE model_controls
+                    SET ${setters.join(', ')}
+                    WHERE provider_name = $1 AND model_id = $2
+                `, values);
+                if (body.enabled === false) {
+                    await db.pool.query(
+                        'DELETE FROM model_preferences WHERE provider_name = $1 AND model_id = $2',
+                        [provider, modelId],
+                    );
+                }
+                sendJson(response, 200, { saved: true });
+                return;
+            }
+            if (request.method === 'GET' && url.pathname === '/api/model-catalog') {
+                const discovery = await callBridge('/model-catalog');
+                sendJson(response, 200, {
+                    models: Array.isArray(discovery.models) ? discovery.models.map(model => ({
+                        ...model,
+                        provider_name: model.provider_name || model.provider,
+                        baseUrl: model.base_url || model.baseUrl || '',
+                        supportsVision: Boolean(model.supports_vision),
+                        supportsThinking: Boolean(model.supports_thinking),
+                    })) : [],
+                });
                 return;
             }
             if (request.method === 'GET' && url.pathname === '/api/models') {

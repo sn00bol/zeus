@@ -123,7 +123,14 @@ _FAMILY_PATTERNS: list[tuple[re.Pattern[str], ModelFamily]] = [
 ]
 
 _VISION_PATTERNS = re.compile(
-    r"vision|vl\b|llava|bakllava|moondream|minicpm.?v|qwen.?vl", re.IGNORECASE
+    r"vision|vl\b|llava|bakllava|moondream|minicpm.?v|qwen.?vl|gpt-4o|gpt-4\.1|"
+    r"gpt-5|gemini|claude-3|claude-4|pixtral",
+    re.IGNORECASE,
+)
+_THINKING_PATTERNS = re.compile(
+    r"(?:^|[-_/.])(?:r1|qwq|reasoning|thinking|reasoner|o1|o3|o4)(?:[-_/.]|$)|"
+    r"deepseek-r1|deepseek-reasoner|gpt-oss",
+    re.IGNORECASE,
 )
 _AUDIO_PATTERNS  = re.compile(r"whisper|audio|speech", re.IGNORECASE)
 _CODE_PATTERNS   = re.compile(
@@ -140,10 +147,71 @@ def detect_family(model_id: str) -> ModelFamily:
     return ModelFamily.UNKNOWN
 
 
-def detect_modalities(model_id: str) -> list[Modality]:
-    """Infer which modalities a model supports from its name."""
+def _metadata_capability(raw: dict[str, Any], capability: str) -> bool | None:
+    aliases = {
+        "vision": {
+            "image", "images", "vision", "supports_image", "supports_images",
+            "supports_vision", "vision_enabled",
+        },
+        "thinking": {
+            "reasoning", "reasoning_effort", "supports_reasoning",
+            "supports_thinking", "thinking", "thinking_enabled",
+        },
+    }[capability]
+    containers = {
+        "capabilities", "modalities", "input_modalities", "supported_modalities",
+        "supported_parameters", "metadata", "architecture",
+    }
+    found: bool | None = None
+    pending: list[tuple[Any, int]] = [(raw, 0)]
+    while pending:
+        value, depth = pending.pop()
+        if depth > 5:
+            continue
+        if isinstance(value, dict):
+            for key, child in value.items():
+                normalized = re.sub(r"[^a-z0-9_]", "_", str(key).lower()).strip("_")
+                if normalized in aliases and isinstance(child, bool):
+                    found = child
+                elif normalized in containers and isinstance(child, (dict, list, tuple)):
+                    pending.append((child, depth + 1))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                token = str(item).strip().lower().replace("-", "_")
+                if capability == "vision" and token in {"image", "images", "vision"}:
+                    found = True
+                elif capability == "thinking" and token in {
+                    "reasoning", "reasoning_effort", "thinking", "include_reasoning",
+                }:
+                    found = True
+                elif isinstance(item, (dict, list, tuple)):
+                    pending.append((item, depth + 1))
+    return found
+
+
+def detect_supports_vision(model_id: str, raw: dict[str, Any] | None = None) -> bool:
+    """Detect image capability from provider metadata, falling back to known model IDs."""
+    metadata_value = _metadata_capability(raw or {}, "vision")
+    if metadata_value is not None:
+        return metadata_value
+    return bool(_VISION_PATTERNS.search(model_id))
+
+
+def detect_supports_thinking(model_id: str, raw: dict[str, Any] | None = None) -> bool:
+    """Detect reasoning/thinking capability from provider metadata or model ID."""
+    metadata_value = _metadata_capability(raw or {}, "thinking")
+    if metadata_value is not None:
+        return metadata_value
+    return bool(_THINKING_PATTERNS.search(model_id))
+
+
+def detect_modalities(
+    model_id: str,
+    raw: dict[str, Any] | None = None,
+) -> list[Modality]:
+    """Infer which modalities a model supports from metadata or its name."""
     modalities: list[Modality] = [Modality.TEXT]
-    if _VISION_PATTERNS.search(model_id):
+    if detect_supports_vision(model_id, raw):
         modalities.append(Modality.IMAGE)
     if _AUDIO_PATTERNS.search(model_id):
         modalities.append(Modality.AUDIO)
@@ -223,9 +291,13 @@ class BaseProvider(ABC):
         return ModelInfo(
             id=model_id,
             family=detect_family(model_id),
-            modalities=detect_modalities(model_id),
+            modalities=detect_modalities(model_id, raw),
             limits=limits or ModelLimits(),
-            raw=raw,
+            raw={
+                **raw,
+                "supports_vision": detect_supports_vision(model_id, raw),
+                "supports_thinking": detect_supports_thinking(model_id, raw),
+            },
         )
 
     def __repr__(self) -> str:

@@ -149,6 +149,21 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         for (const assetPath of [
             '/js/renderMath.js',
             '/js/renderHTML.js',
+            '/js/settings.js',
+            '/icon/model.png',
+            '/icon/search.png',
+            '/icon/appearance.png',
+            '/icon/terminal.png',
+            '/icon/more.png',
+            '/icon/refresh.png',
+            '/icon/picture.png',
+            '/icon/brain.png',
+            '/icon/ollama.png',
+            '/icon/lmstudio.png',
+            '/icon/llama-cpp.png',
+            '/icon/settings.png',
+            '/icon/shortcut.png',
+            '/icon/info.png',
             '/vendor/katex/katex.min.css',
             '/vendor/katex/katex.min.js',
             '/vendor/dompurify/purify.min.js',
@@ -160,6 +175,32 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             assert.equal(asset.status, 200, `${assetPath} should be served`);
             assert.ok(asset.body.length > 0, `${assetPath} should not be empty`);
         }
+
+        const settings = await requestRaw('/js/settings.js');
+        assert.match(settings.body.toString('utf8'), /Model Manager/);
+        assert.match(settings.body.toString('utf8'), /data-page="shortcuts" hidden/);
+        assert.match(settings.body.toString('utf8'), /<h2 class="settings-section-title">Model Manager<\/h2>/);
+        assert.match(settings.body.toString('utf8'), /settings-catalog-refresh/);
+        assert.match(settings.body.toString('utf8'), /class="settings-search"/);
+        assert.match(settings.body.toString('utf8'), /search-open/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /\.settings-search:focus\s*\{/);
+        assert.match(settings.body.toString('utf8'), /\/icon\/model\.png/);
+        assert.match(settings.body.toString('utf8'), /\['supportsVision', 'Vision'\]/);
+        assert.match(settings.body.toString('utf8'), /\['supportsThinking', 'Thinking'\]/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /badgeIcon|settings-model-badge img/);
+        assert.match(settings.body.toString('utf8'), /id: 'shortcuts', label: 'Shortcut', icon: '\/icon\/shortcut\.png'/);
+        assert.match(settings.body.toString('utf8'), /id: 'information', label: 'Information', icon: '\/icon\/info\.png'/);
+        assert.match(settings.body.toString('utf8'), /\.settings-nav\[data-section="information"\] img \{ filter: none; \}/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /Manage models detected from your local providers/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /Manage all models/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /deleteManagedModel|textContent = 'Delete'/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /External model detection|OpenAI-compatible/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /Quick model selection|settings-manage-status|Model list refreshed|Model settings saved/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /data-model-tab=/);
+
+        const pageMarkup = page.body.toString('utf8');
+        assert.match(pageMarkup, /<aside class="sidebar"[\s\S]*?<button class="sidebar-settings-button" id="settings-open-button"/);
+        assert.doesNotMatch(pageMarkup, /<div class="chat-actions"[\s\S]*?id="settings-open-button"/);
 
         const renderer = await requestRaw('/js/render.js');
         assert.equal(renderer.status, 200);
@@ -233,6 +274,43 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.equal(completed.body.streamId, null);
     } finally {
         if (releaseStream) releaseStream();
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('model catalog entries cannot be deleted through the WebUI API', async () => {
+    const server = createWebUiServer({ db: {} });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    try {
+        const response = await fetch(
+            `http://127.0.0.1:${port}/api/model-catalog/ollama/local-model`,
+            { method: 'DELETE' },
+        );
+        assert.equal(response.status, 404);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('external OpenAI-compatible model routes are no longer available', async () => {
+    const server = createWebUiServer({ db: {} });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address();
+    try {
+        for (const [path, method] of [
+            ['/api/external-models', 'GET'],
+            ['/api/external-models', 'POST'],
+            ['/api/external-models/detect', 'POST'],
+        ]) {
+            const response = await fetch('http://127.0.0.1:' + port + path, { method });
+            assert.equal(response.status, 404);
+        }
+    } finally {
         await new Promise((resolve, reject) => server.close(error => (
             error ? reject(error) : resolve()
         )));

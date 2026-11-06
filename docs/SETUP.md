@@ -149,6 +149,14 @@ To stop only SearXNG while leaving ZEUS and PostgreSQL running:
 docker compose stop searxng
 ```
 
+## Manage local models
+
+Open **Settings → Model Manager** to manage models discovered from the
+configured Ollama, LM Studio, and llama.cpp providers. Models can be disabled or
+deleted from ZEUS without removing them from the provider. Image and thinking
+indicators are inferred from provider metadata when available, with known
+model-ID patterns as a fallback. WebUI image upload is not yet supported.
+
 The ZEUS and SearXNG services are separate containers. `docker compose down`
 stops and removes the containers for the whole stack; it does not remove the
 SearXNG image or the SearXNG settings files.

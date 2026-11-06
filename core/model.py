@@ -9,11 +9,16 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Callable, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 import httpx
 
-from src.provider import BaseProvider, ModelInfo, get_provider
+from src.provider import (
+    BaseProvider,
+    ModelInfo,
+    detect_supports_thinking,
+    get_provider,
+)
 from src.tools.search import SearchResult, SearXNGSearch
 from src.skills.conversation import ConversationComposer, DEFAULT_TEMPERATURE
 from src.skills.runtime import SkillRuntime
@@ -120,6 +125,16 @@ class _SearchClient(Protocol):
     async def search(self, query: str, *, limit: int = 6) -> list[SearchResult]: ...
 
 
+class _ExternalModelDatabase(Protocol):
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, Any]]: ...
+
+    async def fetchrow(
+        self,
+        query: str,
+        *args: object,
+    ) -> Mapping[str, Any] | None: ...
+
+
 @dataclass
 class ModelContext:
     """Resolved model and shared inference context for one platform request."""
@@ -147,12 +162,17 @@ class ModelManager:
         skill_runtime: SkillRuntime | None = None,
         search_client: _SearchClient | None = None,
         search_config: SearchConfig | None = None,
+        database: _ExternalModelDatabase | None = None,
     ) -> None:
         if cache_ttl_seconds <= 0:
             raise ValueError("Model cache TTL must be greater than zero.")
         self._cache_ttl_seconds = cache_ttl_seconds
         self._provider_factory = provider_factory
         self._memory_store = memory_store
+        self._database = (
+            database if database is not None
+            else getattr(memory_store, "_database", None)
+        )
         self._memory_bridge = MemoryBridge(memory_store) if memory_store is not None else None
         self._skill_runtime = skill_runtime or SkillRuntime()
         self.search_config = search_config or SearchConfig()
@@ -174,6 +194,10 @@ class ModelManager:
             self._providers[normalized] = self._provider_factory(normalized)
         return self._providers[normalized]
 
+    async def _provider_for(self, name: str) -> BaseProvider:
+        normalized = name.lower()
+        return self.get_provider(normalized)
+
     async def available_providers(self) -> list[str]:
         names = ("ollama", "lmstudio", "llamacpp")
 
@@ -185,7 +209,8 @@ class ModelManager:
                 return False
 
         results = await asyncio.gather(*(is_available(name) for name in names))
-        return [name for name, available in zip(names, results) if available]
+        available = [name for name, is_ready in zip(names, results) if is_ready]
+        return available
 
     async def models_for(self, provider_name: str, *, refresh: bool = False) -> list[ModelInfo]:
         name = provider_name.lower()
@@ -204,7 +229,7 @@ class ModelManager:
                 return list(cached[1])
 
             self._cache_misses += 1
-            provider = self.get_provider(name)
+            provider = await self._provider_for(name)
             models = await provider.list_models()
             self._model_cache[name] = (now + self._cache_ttl_seconds, models)
             return list(models)
@@ -222,7 +247,7 @@ class ModelManager:
         if not refresh and cached and cached[0] > now:
             return cached[1]
 
-        provider = self.get_provider(key[0])
+        provider = await self._provider_for(key[0])
         try:
             model_info = await provider.get_model(model_name)
         except Exception:
@@ -247,24 +272,62 @@ class ModelManager:
         )
         return model_info
 
-    async def available_models(self, *, refresh: bool = False) -> list[dict[str, str]]:
+    async def available_models(
+        self,
+        *,
+        refresh: bool = False,
+        include_disabled: bool = False,
+    ) -> list[dict[str, object]]:
         names = ("ollama", "lmstudio", "llamacpp")
+        controls: dict[tuple[str, str], Mapping[str, Any]] = {}
+        if self._database is not None:
+            rows = await self._database.fetch(
+                """
+                SELECT provider_name, model_id, enabled
+                FROM model_controls
+                """
+            )
+            controls = {
+                (str(row["provider_name"]), str(row["model_id"])): row
+                for row in rows
+            }
 
-        async def discover(name: str) -> list[dict[str, str]]:
+        async def discover(name: str) -> list[dict[str, object]]:
             try:
                 provider = self.get_provider(name)
                 if not await provider.ping():
                     return []
-                return [
-                    {"provider": name, "model": model.id}
-                    for model in await self.models_for(name, refresh=refresh)
-                ]
+                discovered: list[dict[str, object]] = []
+                for model in await self.models_for(name, refresh=refresh):
+                    control = controls.get((name, model.id), {})
+                    enabled = bool(control.get("enabled", True))
+                    if not enabled and not include_disabled:
+                        continue
+                    model_payload: dict[str, object] = {
+                        "provider": name,
+                        "model": model.id,
+                    }
+                    if include_disabled:
+                        model_payload.update({
+                            "enabled": enabled,
+                            "supports_vision": any(
+                                modality.value == "image" for modality in model.modalities
+                            ),
+                            "supports_thinking": detect_supports_thinking(
+                                model.id,
+                                model.raw,
+                            ),
+                            "base_url": provider.endpoint.base_url,
+                        })
+                    discovered.append(model_payload)
+                return discovered
             except Exception:
                 log.exception("Could not discover models from provider %s", name)
                 return []
 
         results = await asyncio.gather(*(discover(name) for name in names))
-        return [model for provider_models in results for model in provider_models]
+        discovered = [model for provider_models in results for model in provider_models]
+        return discovered
 
     @staticmethod
     def get_access_token(provider_name: str) -> str | None:
@@ -291,7 +354,7 @@ class ModelManager:
                 "Start Ollama, LM Studio, or llama-server and try again."
             )
 
-        provider = self.get_provider(provider_name)
+        provider = await self._provider_for(provider_name)
         requested_model = request.model
         if requested_model and requested_model.strip().lower() in {"auto", "automatic"}:
             requested_model = None
@@ -302,12 +365,35 @@ class ModelManager:
         models: list[ModelInfo] = []
         if not model_name:
             models = await self.models_for(provider_name)
+            if self._database is not None:
+                disabled_rows = await self._database.fetch(
+                    """
+                    SELECT model_id
+                    FROM model_controls
+                    WHERE provider_name = $1 AND enabled = FALSE
+                    """,
+                    provider_name,
+                )
+                disabled = {str(row["model_id"]) for row in disabled_rows}
+                models = [model for model in models if model.id not in disabled]
             if not models:
                 raise RuntimeError(
                     f"Provider '{provider_name}' is reachable but has no models loaded."
                 )
             model_name = models[0].id
         else:
+            if self._database is not None:
+                control = await self._database.fetchrow(
+                    """
+                    SELECT enabled
+                    FROM model_controls
+                    WHERE provider_name = $1 AND model_id = $2
+                    """,
+                    provider_name,
+                    model_name,
+                )
+                if control is not None and not bool(control.get("enabled", True)):
+                    raise ValueError("The selected model is disabled in Model Manager.")
             selected_model = await self.model_info_for(provider_name, model_name)
             if selected_model is None:
                 cached = self._model_cache.get(provider_name)
@@ -431,7 +517,10 @@ class ModelManager:
             provider_name=provider_name,
             provider=provider,
             model_name=model_name,
-            api_token=self.get_access_token(provider_name),
+            api_token=(
+                getattr(provider, "api_token", None)
+                or self.get_access_token(provider_name)
+            ),
             messages=built_messages,
             temperature=(
                 requested_temperature

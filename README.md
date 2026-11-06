@@ -1,5 +1,5 @@
 <div align="center">
-<img width=200 height=200 alt="ZEUS" src="assets/ZEUS.png" />
+<img alt="ZEUS" src="assets/ZEUS.png" />
   <p>A self-hosting AI Agent for WebUI, Discord, and Telegram</p>
   <p>
     <a href="#features">Features</a> ·
@@ -38,7 +38,7 @@ Zeus is openly welcome who pull request and contributing to this small project, 
 ## Security
 This project DOES NOT collect any your data information, your Oauth key for shady motives. So at least you should keep private data away and any else about you
 
-To read about version supporting and reporting a vulnerability, check at [security.md](SECURITY.md)
+To read about version supporting and reporting a vulnerability, check at [SECURITY.md](SECURITY.md)
 
 ## License
 Zeus is using GNU GPL v3.0 License, for more detail check it [here](LICENSE).

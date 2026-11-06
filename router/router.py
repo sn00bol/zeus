@@ -418,9 +418,17 @@ class Router:
         """Return names of providers that are currently reachable."""
         return await self.model_manager.available_providers()
 
-    async def available_models(self) -> list[dict[str, str]]:
-        """Discover locally loaded models on each reachable supported provider."""
-        return await self.model_manager.available_models()
+    async def available_models(
+        self,
+        *,
+        refresh: bool = False,
+        include_disabled: bool = False,
+    ) -> list[dict[str, object]]:
+        """Discover models, optionally including entries disabled in Model Manager."""
+        return await self.model_manager.available_models(
+            refresh=refresh,
+            include_disabled=include_disabled,
+        )
 
     # ------------------------------------------------------------------
     # Routing
@@ -728,6 +736,12 @@ class Router:
         payload.pop("search_skill", None)
         if provider.name == "ollama":
             payload["reasoning_effort"] = "medium" if think else "none"
+        elif hasattr(provider, "supports_thinking"):
+            if getattr(provider, "supports_thinking"):
+                payload["reasoning_effort"] = "medium" if think else "none"
+            else:
+                payload.pop("reasoning_effort", None)
+                payload.pop("chat_template_kwargs", None)
         elif think or explicit_think:
             template = dict(payload.get("chat_template_kwargs") or {})
             template["enable_thinking"] = think

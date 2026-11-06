@@ -19,6 +19,8 @@ from .base import (
     ProviderEndpoint,
     detect_family,
     detect_modalities,
+    detect_supports_thinking,
+    detect_supports_vision,
 )
 from .llamacpp import LlamaCppProvider
 from .lmstudio import LMStudioProvider
@@ -73,5 +75,7 @@ __all__ = [
     "ProviderEndpoint",
     "detect_family",
     "detect_modalities",
+    "detect_supports_thinking",
+    "detect_supports_vision",
     "get_provider",
 ]

@@ -96,6 +96,30 @@ CREATE TABLE IF NOT EXISTS model_preferences (
     CHECK ((provider_name IS NULL AND model_id IS NULL)
         OR (provider_name IS NOT NULL AND model_id IS NOT NULL))
 );
+DELETE FROM model_preferences
+WHERE provider_name LIKE 'external:%';
+
+CREATE TABLE IF NOT EXISTS model_controls (
+    provider_name TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (provider_name, model_id)
+);
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'model_controls'
+          AND column_name = 'deleted'
+    ) THEN
+        EXECUTE 'UPDATE model_controls SET enabled = FALSE WHERE deleted = TRUE';
+        EXECUTE 'ALTER TABLE model_controls DROP COLUMN deleted';
+    END IF;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS chat_threads (
     thread_id TEXT PRIMARY KEY,
