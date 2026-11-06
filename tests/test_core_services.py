@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import unittest
@@ -113,6 +114,40 @@ class FakeSearchClient:
 
 
 class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_model_discovery_checks_providers_concurrently(self) -> None:
+        names = ("ollama", "lmstudio", "llamacpp")
+        providers_started = 0
+        all_providers_started = asyncio.Event()
+
+        class ConcurrentProvider:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def ping(self) -> bool:
+                nonlocal providers_started
+                providers_started += 1
+                if providers_started == len(names):
+                    all_providers_started.set()
+                await asyncio.wait_for(all_providers_started.wait(), timeout=1)
+                return True
+
+            async def list_models(self) -> list[ModelInfo]:
+                return [ModelInfo(id=f"{self.name}-model")]
+
+        manager = ModelManager(
+            provider_factory=lambda name: ConcurrentProvider(name),  # type: ignore[arg-type]
+        )
+
+        models = await manager.available_models()
+
+        self.assertEqual(
+            models,
+            [
+                {"provider": name, "model": f"{name}-model"}
+                for name in names
+            ],
+        )
+
     async def test_runtime_status_reports_configured_provider_and_loaded_model(self) -> None:
         provider = FakeProvider()
         manager = ModelManager(provider_factory=lambda _: provider)

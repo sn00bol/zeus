@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 from urllib.error import URLError
+from urllib.parse import urlsplit
 from urllib.request import urlopen
 
 from dotenv import load_dotenv
@@ -192,8 +193,21 @@ def _selected_platforms(value: str | None = None) -> tuple[str, ...]:
     return ("webui", *bot_platforms)
 
 
-def _start_webui(node: str) -> subprocess.Popen[str]:
+def _host_environment() -> dict[str, str]:
     environment = os.environ.copy()
+    search_url = environment.get("SEARXNG_URL", "").strip()
+    if not search_url or urlsplit(search_url).hostname == "searxng":
+        search_port = _configured_port("SEARXNG_PORT", 8888)
+        environment["SEARXNG_URL"] = f"http://127.0.0.1:{search_port}"
+    return environment
+
+
+def _start_webui(
+    node: str,
+    *,
+    environment: dict[str, str] | None = None,
+) -> subprocess.Popen[str]:
+    environment = environment if environment is not None else os.environ.copy()
     server = subprocess.Popen([node, str(ROOT / "webui" / "app.js")], cwd=ROOT, env=environment)
     try:
         deadline = time.monotonic() + 30
@@ -221,13 +235,16 @@ def run_webui() -> int:
     if not _uses_managed_database():
         docker = shutil.which("docker")
         if docker is None:
-            raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
+            raise RuntimeError("Docker is required to start PostgreSQL and SearXNG.")
         _require_docker_engine(docker)
         subprocess.run(
-            [docker, "compose", "up", "-d", "--wait", "postgres"],
+            [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
             cwd=ROOT,
             check=True,
         )
+        environment = _host_environment()
+    else:
+        environment = os.environ.copy()
 
     node = shutil.which("node")
     if node is None:
@@ -235,7 +252,7 @@ def run_webui() -> int:
 
     server: subprocess.Popen[str] | None = None
     try:
-        server = _start_webui(node)
+        server = _start_webui(node, environment=environment)
         print("ZEUS WebUI is running. Press Ctrl+C to stop.")
         while True:
             if server.poll() is not None:
@@ -290,11 +307,13 @@ def run_platforms(
 
     managed_database = _uses_managed_database()
     docker = None
+    process_environment = os.environ.copy()
     if not managed_database:
         docker = shutil.which("docker")
         if docker is None:
-            raise RuntimeError("Docker is required to start the shared PostgreSQL database.")
+            raise RuntimeError("Docker is required to start PostgreSQL and SearXNG.")
         _require_docker_engine(docker)
+        process_environment = _host_environment()
 
     port = _configured_port("BRIDGE_PORT", 5000)
     bridge: subprocess.Popen[str] | None = None
@@ -307,9 +326,9 @@ def run_platforms(
         if managed_database:
             print("Using PostgreSQL provided by the container orchestrator.")
         elif recorder:
-            recorder.record("Starting the shared PostgreSQL database.")
+            recorder.record("Starting PostgreSQL and SearXNG.")
             compose = subprocess.run(
-                [docker, "compose", "up", "-d", "--wait", "postgres"],
+                [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
@@ -324,9 +343,9 @@ def run_platforms(
             if compose.returncode:
                 raise subprocess.CalledProcessError(compose.returncode, compose.args)
         elif not managed_database:
-            print("Starting the shared PostgreSQL database...")
+            print("Starting PostgreSQL and SearXNG...")
             subprocess.run(
-                [docker, "compose", "up", "-d", "--wait", "postgres"],
+                [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
                 cwd=ROOT,
                 check=True,
             )
@@ -339,6 +358,7 @@ def run_platforms(
         bridge_platform = "discord" if "discord" in names else names[0]
         bridge = subprocess.Popen(
             [sys.executable, "-m", f"src.{bridge_platform}_bridge"],
+            env=process_environment,
             **bridge_options,
         )
         if recorder and bridge.stdout:
@@ -350,7 +370,7 @@ def run_platforms(
         next_healthcheck_port = _configured_port("HEALTHCHECK_PORT", 3001)
         used_healthcheck_ports = {webui_port} if webui_port is not None else set()
         for name in names:
-            bot_environment = os.environ.copy()
+            bot_environment = process_environment.copy()
             bot_environment["ZEUS_SUPERVISED"] = "1"
             bot_environment["PLATFORM"] = name
             if with_webui:
@@ -374,7 +394,7 @@ def run_platforms(
             if recorder and bot.stdout:
                 recorder.attach(name, bot.stdout)
         if with_webui:
-            webui_server = _start_webui(node)
+            webui_server = _start_webui(node, environment=process_environment)
             print(f"ZEUS WebUI is available at http://localhost:{_webui_port()}.")
         if recorder:
             recorder.record(f"ZEUS {', '.join(names)} platform(s) are running.")

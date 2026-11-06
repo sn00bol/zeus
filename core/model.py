@@ -175,14 +175,17 @@ class ModelManager:
         return self._providers[normalized]
 
     async def available_providers(self) -> list[str]:
-        available: list[str] = []
-        for name in ("ollama", "lmstudio", "llamacpp"):
+        names = ("ollama", "lmstudio", "llamacpp")
+
+        async def is_available(name: str) -> bool:
             try:
-                if await self.get_provider(name).ping():
-                    available.append(name)
+                return await self.get_provider(name).ping()
             except Exception:
                 log.debug("Provider %s is unavailable.", name, exc_info=True)
-        return available
+                return False
+
+        results = await asyncio.gather(*(is_available(name) for name in names))
+        return [name for name, available in zip(names, results) if available]
 
     async def models_for(self, provider_name: str, *, refresh: bool = False) -> list[ModelInfo]:
         name = provider_name.lower()
@@ -245,19 +248,23 @@ class ModelManager:
         return model_info
 
     async def available_models(self, *, refresh: bool = False) -> list[dict[str, str]]:
-        discovered: list[dict[str, str]] = []
-        for name in ("ollama", "lmstudio", "llamacpp"):
+        names = ("ollama", "lmstudio", "llamacpp")
+
+        async def discover(name: str) -> list[dict[str, str]]:
             try:
                 provider = self.get_provider(name)
                 if not await provider.ping():
-                    continue
-                discovered.extend(
+                    return []
+                return [
                     {"provider": name, "model": model.id}
                     for model in await self.models_for(name, refresh=refresh)
-                )
+                ]
             except Exception:
                 log.exception("Could not discover models from provider %s", name)
-        return discovered
+                return []
+
+        results = await asyncio.gather(*(discover(name) for name in names))
+        return [model for provider_models in results for model in provider_models]
 
     @staticmethod
     def get_access_token(provider_name: str) -> str | None:

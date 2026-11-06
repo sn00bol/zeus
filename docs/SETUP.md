@@ -187,13 +187,14 @@ This is optional for Docker-only use. If setup is run, review the generated
 `.env` and ensure `ZEUS_LLM_HOST` is appropriate for Docker before starting
 Compose.
 
-## Run without Docker
+## Run the application on the host
 
-For development or a host-managed PostgreSQL server:
+For development, you can run the WebUI and inference bridge on the host while
+Docker runs PostgreSQL and SearXNG:
 
 1. Install Node.js 16.11+ and Python 3.13+.
 2. Create and configure `.env` as described in [ENV.md](./ENV.md), including
-   database connection details and a reachable model server.
+   database credentials, `SEARXNG_SECRET`, and a reachable model server.
 3. Install dependencies:
 
    ```bash
@@ -207,6 +208,14 @@ For development or a host-managed PostgreSQL server:
    python app.py
    ```
 
-The supervisor starts the WebUI and its private inference bridge. Discord and
-Telegram can be selected together; the supervisor starts both bot processes
-and shares their platform inference bridge.
+The supervisor starts the PostgreSQL and SearXNG containers, then runs the
+WebUI and its private inference bridge on the host. It maps the default
+container-only SearXNG address to `http://127.0.0.1:<SEARXNG_PORT>` for the
+host processes. The `zeus` application container is not started in this mode,
+so it cannot conflict with the host WebUI port. Discord and Telegram can be
+selected together; the supervisor starts both bot processes and shares their
+platform inference bridge.
+
+To run without Docker, provide a host-managed PostgreSQL server and a reachable
+SearXNG instance, then set `ZEUS_MANAGED_DATABASE=true`, `DB_HOST`, and
+`SEARXNG_URL` in `.env`.

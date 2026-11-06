@@ -37,6 +37,48 @@ class RunLogRecorderTests(unittest.TestCase):
 
 
 class ManagedDatabaseTests(unittest.TestCase):
+    def test_host_webui_starts_postgres_and_searxng(self) -> None:
+        server = MagicMock()
+        server.poll.return_value = None
+        environment = {
+            "DB_PASSWORD": "test-password",
+            "SEARXNG_URL": "http://searxng:8080",
+            "SEARXNG_PORT": "8889",
+        }
+        with (
+            patch.dict("os.environ", environment, clear=True),
+            patch(
+                "app.shutil.which",
+                side_effect=lambda name: {"docker": "docker-test", "node": "node-test"}.get(name),
+            ),
+            patch("app._require_docker_engine"),
+            patch("app.subprocess.run") as run,
+            patch("app._start_webui", return_value=server) as start_webui,
+            patch("app.time.sleep", side_effect=KeyboardInterrupt),
+            patch("app._stop_process"),
+        ):
+            self.assertEqual(app.run_webui(), 0)
+
+        run.assert_called_once_with(
+            ["docker-test", "compose", "up", "-d", "--wait", "postgres", "searxng"],
+            cwd=app.ROOT,
+            check=True,
+        )
+        self.assertEqual(
+            start_webui.call_args.kwargs["environment"]["SEARXNG_URL"],
+            "http://127.0.0.1:8889",
+        )
+
+    def test_host_environment_preserves_custom_searxng_url(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"SEARXNG_URL": "https://search.example.test"},
+            clear=True,
+        ):
+            environment = app._host_environment()
+
+        self.assertEqual(environment["SEARXNG_URL"], "https://search.example.test")
+
     def test_selected_platforms_always_include_webui_and_allow_both_bots(self) -> None:
         self.assertEqual(app._selected_platforms(""), ("webui",))
         self.assertEqual(app._selected_platforms("discord"), ("webui", "discord"))
