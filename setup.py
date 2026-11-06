@@ -40,14 +40,13 @@ class Colors:
     MAGENTA = "\033[95m"
     BLUE = "\033[94m"
 
-BANNER = f"""{Colors.CYAN}{Colors.BOLD}
+BANNER = f"""{Colors.YELLOW}{Colors.BOLD}
   ███████╗███████╗██╗  ██╗███████╗
   ╚══███═╝██╔════╝██║  ██║██╔════╝
     ███╔╝ █████╗  ██║  ██║███████╗
    ███╔╝  ██╔══╝  ██║  ██║╚════██║
   ███████╗███████╗╚█████╔╝███████║
   ╚══════╝╚══════╝ ╚════╝ ╚══════╝
-{Colors.RESET}{Colors.DIM} Welcome to ZEUS! Please follow the prompts to configure your setup{Colors.RESET}
 """
 
 def print_step(title: str) -> None:
