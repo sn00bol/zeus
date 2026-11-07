@@ -473,6 +473,16 @@ function renderModelMenu() {
         more.textContent = 'Show more — coming soon';
         modelMenu.append(more);
     }
+    const manage = document.createElement('button');
+    manage.className = 'model-picker-manage';
+    manage.type = 'button';
+    manage.textContent = 'Manage models...';
+    manage.addEventListener('click', () => {
+        modelMenu.hidden = true;
+        modelButton.setAttribute('aria-expanded', 'false');
+        settings?.openSection('models');
+    });
+    modelMenu.append(manage);
 }
 
 async function chooseModel(model, { showError = true } = {}) {

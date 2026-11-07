@@ -1041,13 +1041,16 @@ export function initializeSettings({
     for (const button of dialog.querySelectorAll('.settings-nav')) {
         button.addEventListener('click', () => activateSection(button.dataset.section));
     }
-    openButton?.addEventListener('click', () => {
-        dialog.showModal();
-        activateSection('models');
-        void refreshModelData().catch(error => (
-            window.alert(`Could not load model catalog: ${error.message}`)
-        ));
-    });
+    function openSection(sectionId) {
+        if (!dialog.open) dialog.showModal();
+        activateSection(sectionId);
+        if (sectionId === 'models') {
+            void refreshModelData().catch(error => (
+                window.alert(`Could not load model catalog: ${error.message}`)
+            ));
+        }
+    }
+    openButton?.addEventListener('click', () => openSection('models'));
     closeButton.addEventListener('click', () => dialog.close());
     dialog.addEventListener('click', event => {
         if (event.target === dialog) dialog.close();
@@ -1127,5 +1130,6 @@ export function initializeSettings({
 
     return {
         isSearchEnabled: () => searchEnabled,
+        openSection,
     };
 }

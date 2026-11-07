@@ -250,6 +250,14 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /\.chat-scrollbar::before \{[^}]*pointer-events:\s*none;/);
         assert.match(theme.body.toString('utf8'), /\.chat-scrollbar:hover \{ opacity:\s*\.55; \}/);
         assert.doesNotMatch(theme.body.toString('utf8'), /#a78bfa|#c4b5fd/);
+        assert.match(theme.body.toString('utf8'), /\.message\.user \.message-body \{[^}]*border-radius: 999px;/);
+        assert.match(theme.body.toString('utf8'), /\.message\.user \.message-body \{[^}]*padding: 11px 15px 0;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.send-icon \{ filter: brightness\(0\) invert\(1\); \}/);
+        assert.doesNotMatch(theme.body.toString('utf8'), /\.composer:focus-within/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content pre code \{ color: #262626; \}/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.math-inline,/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.markdown-table th \{ color: #262626; background: #f5f5f5;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content mark \{ color: #713f12; background: #fef08a; \}/);
 
         for (const assetPath of [
             '/js/renderMath.js',
@@ -288,11 +296,17 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         }
 
         const settings = await requestRaw('/js/settings.js');
+        assert.equal(settings.status, 200);
+        assert.match(settings.body.toString('utf8'), /openSection,\s*\n\s*\};/);
         assert.match(settings.body.toString('utf8'), /Model Manager/);
         assert.match(settings.body.toString('utf8'), /data-page="shortcuts" hidden/);
         assert.match(settings.body.toString('utf8'), /<h2 class="settings-section-title">Model Manager<\/h2>/);
         assert.match(settings.body.toString('utf8'), /settings-catalog-refresh/);
         assert.match(settings.body.toString('utf8'), /class="settings-search"/);
+        const chat = await requestRaw('/js/chat.js');
+        assert.equal(chat.status, 200);
+        assert.match(chat.body.toString('utf8'), /textContent = 'Manage models\.\.\.'/);
+        assert.match(chat.body.toString('utf8'), /settings\?\.openSection\('models'\)/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search,[\s\S]*?background: #ffffff/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search::placeholder/);
         assert.match(settings.body.toString('utf8'), /settings-search-results chat-scroll/);
