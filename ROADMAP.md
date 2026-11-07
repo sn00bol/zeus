@@ -27,5 +27,5 @@ TODOS:
 - Add AI Agents sandbox enviroments to test running python code, testing, debug,...
 - Add limit text on platform to prevent not fully display or send prompt too long, and platform have max token
 - Add supporting rendering for Telegram
-- Add ZEUS Webui settings, model selection more advance
+- Uprade list UI in WebUI
 - Add support image/file,... (and no limits)

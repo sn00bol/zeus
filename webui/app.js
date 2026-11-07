@@ -43,6 +43,19 @@ function sendJson(response, statusCode, payload) {
     response.end(body);
 }
 
+function getNodeDependencies() {
+    const { dependencies } = JSON.parse(
+        fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+    );
+    return Object.keys(dependencies || {}).map(name => {
+        const packagePath = path.join(ROOT, 'node_modules', name, 'package.json');
+        const version = fs.existsSync(packagePath)
+            ? JSON.parse(fs.readFileSync(packagePath, 'utf8')).version
+            : 'Not installed';
+        return { name, version: version || 'Unknown' };
+    });
+}
+
 function validateConversationId(value) {
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
         throw new HttpError(400, 'conversationId must contain 1-128 letters, numbers, "_" or "-".');
@@ -175,6 +188,7 @@ function createWebUiServer({
                         version: process.version,
                         status: 'online',
                         detail: 'WebUI runtime',
+                        dependencies: getNodeDependencies(),
                     },
                     python: {
                         version: pythonResult.status === 'fulfilled'
@@ -182,6 +196,9 @@ function createWebUiServer({
                             : 'Unavailable',
                         status: pythonResult.status === 'fulfilled' ? 'online' : 'offline',
                         detail: 'Inference runtime',
+                        dependencies: pythonResult.status === 'fulfilled'
+                            ? pythonResult.value.dependencies || []
+                            : [],
                     },
                 });
                 return;
@@ -213,11 +230,13 @@ function createWebUiServer({
                 );
                 return;
             }
-            if (request.method === 'GET' && url.pathname === '/font/Streetsign-Sans.otf') {
+            const fontMatch = url.pathname.match(/^\/font\/(Streetsign-Sans\.otf|Geist-(?:Regular|Bold|Italic|BoldItalic)\.ttf)$/);
+            if (request.method === 'GET' && fontMatch) {
+                const contentType = fontMatch[1].endsWith('.otf') ? 'font/otf' : 'font/ttf';
                 sendStatic(
                     response,
-                    path.join(__dirname, 'font', 'Streetsign-Sans.otf'),
-                    'font/otf',
+                    path.join(__dirname, 'font', fontMatch[1]),
+                    contentType,
                 );
                 return;
             }

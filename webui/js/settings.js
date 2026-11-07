@@ -76,13 +76,19 @@ const SETTINGS_STYLE = `
 .settings-info-card-value { overflow-wrap: anywhere; color: #f5f5f4; font-size: 26px; font-weight: 650; letter-spacing: -.025em; }
 .settings-info-card-detail { min-height: 1.4em; color: #a8a29e; font-size: 11px; line-height: 1.4; }
 .settings-info-runtime { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; border: 1px solid #ffffff14; border-radius: 12px; background: #ffffff08; }
+.settings-info-runtime-section { min-width: 0; position: relative; display: grid; }
+.settings-info-runtime-section + .settings-info-runtime-section::before { position: absolute; top: 0; right: 16px; left: 16px; height: 1px; background: #ffffff18; content: ""; }
 .settings-info-runtime-item { min-width: 0; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 16px; }
-.settings-info-runtime-item + .settings-info-runtime-item::before { position: absolute; top: 0; right: 16px; left: 16px; height: 1px; background: #ffffff18; content: ""; }
 .settings-info-runtime-name { min-width: 0; display: flex; align-items: center; }
 .settings-info-runtime-label { color: #a8a29e; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .settings-info-runtime-value { overflow-wrap: anywhere; color: #d6d3d1; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.settings-info-dependencies { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; margin: 0; padding: 0 16px 10px; list-style: none; }
+.settings-info-dependency { min-width: 0; display: flex; justify-content: flex-start; gap: 8px; color: #928a83; font-size: 11px; line-height: 1.25; }
+.settings-info-dependency-name { min-width: 0; overflow-wrap: anywhere; }
+.settings-info-dependency-version { flex: none; color: #827a73; font-variant-numeric: tabular-nums; }
 .settings-info-project { margin-top: 12px; }
-.settings-info-project-item { width: 100%; appearance: none; -webkit-appearance: none; border: 0; border-radius: 0; box-shadow: none; color: inherit; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.settings-info-project-item { width: 100%; position: relative; appearance: none; -webkit-appearance: none; border: 0; border-radius: 0; box-shadow: none; color: inherit; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.settings-info-project-item + .settings-info-project-item::before { position: absolute; top: 0; right: 16px; left: 16px; height: 1px; background: #ffffff18; content: ""; }
 .settings-info-project-item:hover { background: #ffffff0d; }
 .settings-info-project-item:focus { color: inherit; background: transparent; }
 .settings-info-project-item:active { background: #ffffff0d; }
@@ -166,6 +172,7 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
     .settings-nav { gap: 5px; font-size: 10px; }
     .settings-info-grid { width: min(100%, 280px); grid-template-columns: minmax(0, 1fr); gap: 8px; }
     .settings-info-card-primary { min-height: 100px; padding: 14px; }
+    .settings-info-dependencies { grid-template-columns: minmax(0, 1fr); }
 }
 `;
 
@@ -321,18 +328,28 @@ export function initializeSettings({
                                     <div class="settings-info-card-detail">Search service status</div>
                                 </article>
                                 <div class="settings-info-runtime">
-                                    <div class="settings-info-runtime-item" data-info-runtime="node">
-                                        <span class="settings-info-runtime-name">
-                                            <span class="settings-info-runtime-label">Node.js</span>
-                                        </span>
-                                        <span class="settings-info-runtime-value">Loading...</span>
-                                    </div>
-                                    <div class="settings-info-runtime-item" data-info-runtime="python">
-                                        <span class="settings-info-runtime-name">
-                                            <span class="settings-info-runtime-label">Python</span>
-                                        </span>
-                                        <span class="settings-info-runtime-value">Loading...</span>
-                                    </div>
+                                    <section class="settings-info-runtime-section" aria-label="Node.js dependencies">
+                                        <div class="settings-info-runtime-item" data-info-runtime="node">
+                                            <span class="settings-info-runtime-name">
+                                                <span class="settings-info-runtime-label">Node.js</span>
+                                            </span>
+                                            <span class="settings-info-runtime-value">Loading...</span>
+                                        </div>
+                                        <ul class="settings-info-dependencies" data-runtime-dependencies="node">
+                                            <li>Loading...</li>
+                                        </ul>
+                                    </section>
+                                    <section class="settings-info-runtime-section" aria-label="Python dependencies">
+                                        <div class="settings-info-runtime-item" data-info-runtime="python">
+                                            <span class="settings-info-runtime-name">
+                                                <span class="settings-info-runtime-label">Python</span>
+                                            </span>
+                                            <span class="settings-info-runtime-value">Loading...</span>
+                                        </div>
+                                        <ul class="settings-info-dependencies" data-runtime-dependencies="python">
+                                            <li>Loading...</li>
+                                        </ul>
+                                    </section>
                                 </div>
                             </div>
                             <div class="settings-info-runtime settings-info-project" aria-label="Project documents">
@@ -430,6 +447,7 @@ export function initializeSettings({
     const versionError = dialog.querySelector('.settings-version-error');
     const infoCards = dialog.querySelectorAll('[data-info-card]');
     const infoRuntimeItems = dialog.querySelectorAll('[data-info-runtime]');
+    const infoRuntimeDependencies = dialog.querySelectorAll('[data-runtime-dependencies]');
     const projectDocs = dialog.querySelectorAll('[data-project-doc]');
     const projectDocDialog = dialog.querySelector('.settings-doc-dialog');
     const projectDocTitle = dialog.querySelector('.settings-doc-dialog-title');
@@ -507,6 +525,28 @@ export function initializeSettings({
                     result[item.dataset.infoRuntime].version
                 );
             }
+            for (const list of infoRuntimeDependencies) {
+                const dependencies = result[list.dataset.runtimeDependencies]?.dependencies;
+                list.replaceChildren();
+                if (!Array.isArray(dependencies) || dependencies.length === 0) {
+                    const item = document.createElement('li');
+                    item.textContent = 'Unavailable';
+                    list.append(item);
+                    continue;
+                }
+                for (const dependency of dependencies) {
+                    const item = document.createElement('li');
+                    item.className = 'settings-info-dependency';
+                    const name = document.createElement('span');
+                    name.className = 'settings-info-dependency-name';
+                    name.textContent = dependency.name;
+                    const version = document.createElement('span');
+                    version.className = 'settings-info-dependency-version';
+                    version.textContent = dependency.version;
+                    item.append(name, version);
+                    list.append(item);
+                }
+            }
         } catch (error) {
             console.error('Could not load system information:', error);
             versionValue.textContent = 'Unavailable';
@@ -517,6 +557,9 @@ export function initializeSettings({
             }
             for (const item of infoRuntimeItems) {
                 item.querySelector('.settings-info-runtime-value').textContent = 'Unavailable';
+            }
+            for (const list of infoRuntimeDependencies) {
+                list.textContent = 'Unavailable';
             }
         }
     }

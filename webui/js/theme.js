@@ -1,7 +1,35 @@
 const themeStyles = String.raw`
+@font-face {
+            font-family: Geist;
+            src: url("/font/Geist-Regular.ttf") format("truetype");
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: Geist;
+            src: url("/font/Geist-Bold.ttf") format("truetype");
+            font-style: normal;
+            font-weight: 700;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: Geist;
+            src: url("/font/Geist-Italic.ttf") format("truetype");
+            font-style: italic;
+            font-weight: 400;
+            font-display: swap;
+        }
+        @font-face {
+            font-family: Geist;
+            src: url("/font/Geist-BoldItalic.ttf") format("truetype");
+            font-style: italic;
+            font-weight: 700;
+            font-display: swap;
+        }
 :root {
             color-scheme: dark;
-            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            font-family: Geist, sans-serif;
             background: #100d0b;
             color: #edf0f7;
             font-synthesis: none;

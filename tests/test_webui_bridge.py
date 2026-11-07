@@ -93,12 +93,17 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response[0]["status"], 200)
         self.assertEqual(response_json(response), {"status": "ok"})
 
-    async def test_about_endpoint_reports_python_runtime_version(self) -> None:
+    async def test_about_endpoint_reports_python_runtime_and_required_dependencies(self) -> None:
         response = await call_asgi(webui_bridge.create_app(), "GET", "/about")
         self.assertEqual(response[0]["status"], 200)
         self.assertEqual(
             response_json(response),
-            {"python_version": ".".join(str(part) for part in webui_bridge.sys.version_info[:3])},
+            {
+                "python_version": ".".join(
+                    str(part) for part in webui_bridge.sys.version_info[:3]
+                ),
+                "dependencies": webui_bridge._required_python_dependencies(),
+            },
         )
 
     async def test_infer_rejects_empty_messages(self) -> None:

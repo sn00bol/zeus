@@ -80,7 +80,10 @@ test('about endpoint reports ZEUS and runtime versions with SearXNG availability
         db: {},
         bridgeRequest: async route => {
             assert.equal(route, '/about');
-            return { python_version: '3.13.4' };
+            return {
+                python_version: '3.13.4',
+                dependencies: [{ name: 'httpx', version: '0.28.1' }],
+            };
         },
     });
     try {
@@ -92,6 +95,12 @@ test('about endpoint reports ZEUS and runtime versions with SearXNG availability
         assert.equal(about.zeus.value, require('node:fs').readFileSync('version', 'utf8').trim());
         assert.equal(about.node.version, process.version);
         assert.equal(about.python.version, '3.13.4');
+        assert.deepEqual(about.python.dependencies, [{ name: 'httpx', version: '0.28.1' }]);
+        assert.deepEqual(
+            about.node.dependencies.map(dependency => dependency.name),
+            Object.keys(require('../package.json').dependencies),
+        );
+        assert.ok(about.node.dependencies.every(dependency => dependency.version));
         assert.equal(about.python.status, 'online');
         assert.equal(about.searxng.value, 'Available');
         assert.doesNotMatch(JSON.stringify(about.searxng), /latest/);
@@ -203,6 +212,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
 
         const theme = await requestRaw('/js/theme.js');
         assert.equal(theme.status, 200);
+        assert.match(theme.body.toString('utf8'), /font-family:\s*Geist,\s*sans-serif/);
+        assert.match(theme.body.toString('utf8'), /Geist-BoldItalic\.ttf/);
         assert.match(theme.body.toString('utf8'), /--accent:\s*#fb923c/);
         assert.match(theme.body.toString('utf8'), /background:\s*#100d0b/);
         assert.match(theme.body.toString('utf8'), /\.chat-scrollbar \{[^}]*width:\s*30px;[^}]*pointer-events:\s*auto;/);
@@ -235,6 +246,11 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             '/vendor/markdown-it/markdown-it.min.js',
             '/vendor/task-lists/markdown-it-task-lists.min.js',
             '/vendor/katex/fonts/KaTeX_Main-Regular.woff2',
+            '/font/Geist-Regular.ttf',
+            '/font/Geist-Bold.ttf',
+            '/font/Geist-Italic.ttf',
+            '/font/Geist-BoldItalic.ttf',
+            '/font/Streetsign-Sans.otf',
         ]) {
             const asset = await requestRaw(assetPath);
             assert.equal(asset.status, 200, `${assetPath} should be served`);
@@ -253,6 +269,16 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(settings.body.toString('utf8'), /class="chat-scrollbar"/);
         assert.doesNotMatch(settings.body.toString('utf8'), /\.settings-doc-scrollbar/);
         assert.match(settings.body.toString('utf8'), /label: 'About ZEUS', keywords: 'about zeus version information'/);
+        assert.match(settings.body.toString('utf8'), /data-runtime-dependencies="node"/);
+        assert.match(settings.body.toString('utf8'), /data-runtime-dependencies="python"/);
+        assert.match(settings.body.toString('utf8'), /data-info-runtime="node"/);
+        assert.match(settings.body.toString('utf8'), /data-info-runtime="python"/);
+        assert.match(settings.body.toString('utf8'), /\.settings-info-dependencies \{ display: grid; grid-template-columns: minmax\(0, 1fr\); gap: 2px;/);
+        assert.match(settings.body.toString('utf8'), /\.settings-info-dependency \{[^}]*color: #928a83;/);
+        assert.match(settings.body.toString('utf8'), /\.settings-info-runtime-section \+ \.settings-info-runtime-section::before \{[^}]*right: 16px; left: 16px;[^}]*height: 1px;/);
+        assert.match(settings.body.toString('utf8'), /\.settings-info-project-item \+ \.settings-info-project-item::before \{[^}]*right: 16px; left: 16px;[^}]*height: 1px;/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /Required dependencies/);
+        assert.match(settings.body.toString('utf8'), /\.settings-version-value \{ font-family: "Streetsign Sans", sans-serif;/);
         assert.match(settings.body.toString('utf8'), /search-open/);
         assert.doesNotMatch(settings.body.toString('utf8'), /\.settings-search:focus\s*\{/);
         assert.match(settings.body.toString('utf8'), /\/icon\/model\.png/);

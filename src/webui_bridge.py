@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sys
+import tomllib
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Any
 
 try:
@@ -30,6 +34,24 @@ _database = DatabaseRouter()
 _session_manager = SessionManager(_database)
 _memory_store = MemoryStore(_database)
 _router = Router(memory_store=_memory_store, session_manager=_session_manager)
+
+
+def _required_python_dependencies() -> list[dict[str, str]]:
+    project_file = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    project = tomllib.loads(project_file.read_text(encoding="utf-8"))
+    dependencies = project["project"]["dependencies"]
+    installed = []
+    for requirement in dependencies:
+        match = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)", requirement)
+        if match is None:
+            raise ValueError(f"Invalid Python dependency requirement: {requirement}")
+        name = match.group(1)
+        try:
+            installed_version = version(name)
+        except PackageNotFoundError:
+            installed_version = "Not installed"
+        installed.append({"name": name, "version": installed_version})
+    return installed
 
 
 def _json_bytes(data: Any) -> bytes:
@@ -110,6 +132,7 @@ class WebUiBridge:
         if method == "GET" and path == "/about":
             await _send_json(send, {
                 "python_version": ".".join(str(part) for part in sys.version_info[:3]),
+                "dependencies": _required_python_dependencies(),
             })
             return
         if method == "GET" and path == "/models":
