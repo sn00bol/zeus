@@ -65,6 +65,70 @@ test('conversation titles are immediate and concise for long prompts', () => {
     assert.ok(title.endsWith('…'));
 });
 
+test('about endpoint reports ZEUS and runtime versions with SearXNG availability', async () => {
+    const previousSearxngUrl = process.env.SEARXNG_URL;
+    const previousSearxngVersion = process.env.SEARXNG_VERSION;
+    const searxng = http.createServer((request, response) => {
+        response.writeHead(200);
+        response.end('ready');
+    });
+    await new Promise(resolve => searxng.listen(0, '127.0.0.1', resolve));
+    process.env.SEARXNG_URL = `http://127.0.0.1:${searxng.address().port}`;
+    process.env.SEARXNG_VERSION = 'latest';
+
+    const server = createWebUiServer({
+        db: {},
+        bridgeRequest: async route => {
+            assert.equal(route, '/about');
+            return { python_version: '3.13.4' };
+        },
+    });
+    try {
+        await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+        const { port } = server.address();
+        const response = await fetch(`http://127.0.0.1:${port}/api/about`);
+        assert.equal(response.status, 200);
+        const about = await response.json();
+        assert.equal(about.zeus.value, require('node:fs').readFileSync('version', 'utf8').trim());
+        assert.equal(about.node.version, process.version);
+        assert.equal(about.python.version, '3.13.4');
+        assert.equal(about.python.status, 'online');
+        assert.equal(about.searxng.value, 'Available');
+        assert.doesNotMatch(JSON.stringify(about.searxng), /latest/);
+        assert.equal(about.searxng.status, 'online');
+    } finally {
+        await new Promise(resolve => server.close(resolve));
+        await new Promise(resolve => searxng.close(resolve));
+        if (previousSearxngUrl === undefined) delete process.env.SEARXNG_URL;
+        else process.env.SEARXNG_URL = previousSearxngUrl;
+        if (previousSearxngVersion === undefined) delete process.env.SEARXNG_VERSION;
+        else process.env.SEARXNG_VERSION = previousSearxngVersion;
+    }
+});
+
+test('project document routes serve the repository Markdown files', async () => {
+    const server = createWebUiServer({
+        db: {},
+        bridgeRequest: async () => ({}),
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const base = `http://127.0.0.1:${server.address().port}`;
+        for (const file of ['CONTRIBUTING.md', 'SECURITY.md', 'PRIVACY.md']) {
+            const response = await fetch(`${base}/project-docs/${file}`);
+            assert.equal(response.status, 200);
+            assert.match(response.headers.get('content-type'), /text\/markdown/);
+            assert.equal(await response.text(), require('node:fs').readFileSync(file, 'utf8'));
+        }
+        const unknownDocument = await fetch(`${base}/project-docs/README.md`);
+        assert.equal(unknownDocument.status, 404);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
 test('WebUI uses its bridge and supports reconnecting to a server-side stream', async () => {
     const requests = [];
     const streamManager = new StreamManager();
@@ -150,6 +214,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             '/js/renderMath.js',
             '/js/renderHTML.js',
             '/js/settings.js',
+            '/js/scrollbar.js',
             '/icon/model.png',
             '/icon/search.png',
             '/icon/appearance.png',
@@ -182,6 +247,12 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(settings.body.toString('utf8'), /<h2 class="settings-section-title">Model Manager<\/h2>/);
         assert.match(settings.body.toString('utf8'), /settings-catalog-refresh/);
         assert.match(settings.body.toString('utf8'), /class="settings-search"/);
+        assert.match(settings.body.toString('utf8'), /settings-search-results chat-scroll/);
+        assert.match(settings.body.toString('utf8'), /aria-label="Settings page scroll position"/);
+        assert.match(settings.body.toString('utf8'), /settings-doc-dialog-content chat-scroll/);
+        assert.match(settings.body.toString('utf8'), /class="chat-scrollbar"/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /\.settings-doc-scrollbar/);
+        assert.match(settings.body.toString('utf8'), /label: 'About ZEUS', keywords: 'about zeus version information'/);
         assert.match(settings.body.toString('utf8'), /search-open/);
         assert.doesNotMatch(settings.body.toString('utf8'), /\.settings-search:focus\s*\{/);
         assert.match(settings.body.toString('utf8'), /\/icon\/model\.png/);
@@ -189,7 +260,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(settings.body.toString('utf8'), /\['supportsThinking', 'Thinking'\]/);
         assert.doesNotMatch(settings.body.toString('utf8'), /badgeIcon|settings-model-badge img/);
         assert.match(settings.body.toString('utf8'), /id: 'shortcuts', label: 'Shortcut', icon: '\/icon\/shortcut\.png'/);
-        assert.match(settings.body.toString('utf8'), /id: 'information', label: 'Information', icon: '\/icon\/info\.png'/);
+        assert.match(settings.body.toString('utf8'), /id: 'information', label: 'About ZEUS', icon: '\/icon\/info\.png'/);
         assert.match(settings.body.toString('utf8'), /\.settings-nav\[data-section="information"\] img \{ filter: none; \}/);
         assert.doesNotMatch(settings.body.toString('utf8'), /Manage models detected from your local providers/);
         assert.doesNotMatch(settings.body.toString('utf8'), /Manage all models/);

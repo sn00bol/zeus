@@ -266,6 +266,26 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.context_length, 65536)
         self.assertEqual(status["context_length"], 65536)
 
+    async def test_unavailable_model_metadata_uses_cached_model_without_traceback(self) -> None:
+        model = ModelInfo(id="llama-test")
+
+        class UnavailableMetadataProvider(FakeProvider):
+            async def get_model(self, model_id: str) -> ModelInfo | None:
+                raise httpx.ConnectError("All connection attempts failed")
+
+            async def list_models(self) -> list[ModelInfo]:
+                return [model]
+
+        manager = ModelManager(provider_factory=lambda _: UnavailableMetadataProvider())
+        await manager.models_for("ollama")
+
+        with self.assertLogs("core.model", level="WARNING") as captured:
+            result = await manager.model_info_for("ollama", model.id)
+
+        self.assertIs(result, model)
+        self.assertIn("Continuing with available model metadata.", captured.output[0])
+        self.assertNotIn("Traceback", "\n".join(captured.output))
+
     async def test_research_request_searches_and_adds_bounded_source_context(self) -> None:
         search = FakeSearchClient()
         manager = ModelManager(

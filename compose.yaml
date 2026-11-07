@@ -34,6 +34,7 @@ services:
       LLM_HOST: ${ZEUS_LLM_HOST:-host.docker.internal}
       BRIDGE_TOKEN: ${BRIDGE_TOKEN:?Run python setup.py to generate BRIDGE_TOKEN}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
+      SEARXNG_VERSION: ${SEARXNG_VERSION:-latest}
       ENABLE_DOCKER_HEALTHCHECK: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -50,7 +51,7 @@ services:
       retries: 3
 
   searxng:
-    image: ghcr.io/searxng/searxng:latest
+    image: ghcr.io/searxng/searxng:${SEARXNG_VERSION:-latest}
     restart: unless-stopped
     environment:
       SEARXNG_SECRET: ${SEARXNG_SECRET:?Run python setup.py to generate SEARXNG_SECRET}

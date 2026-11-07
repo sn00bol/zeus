@@ -10,6 +10,7 @@ import { startChatStream, watchChatStream } from './stream.js';
 import { loadSessionHistory, getSessionId } from './session.js';
 import { initializeSettings } from './settings.js';
 import { initializeSidebar } from './sidebar.js';
+import { initializeScrollbar } from './scrollbar.js';
 
 let conversationId = getSessionId();
 const initialSessionId = conversationId;
@@ -54,9 +55,6 @@ let availableTools = [];
 let selectedTools = [];
 let activeToolOption = 0;
 let thinkingMode = localStorage.getItem('zeus.webui.thinking_mode') || 'auto'; // 'auto' | 'on' | 'off'
-let scrollHideTimer = null;
-let scrollDragging = false;
-let scrollDragOffset = 0;
 let promptScrollDragging = false;
 let promptScrollDragOffset = 0;
 let isTempChat = false;
@@ -193,58 +191,28 @@ function setEmptyChatLayout(empty) {
 
 
 
-function updateScrollBar() {
-    const maxScroll = scrollElement.scrollHeight - scrollElement.clientHeight;
-    const chatBounds = chatElement.getBoundingClientRect();
-    const scrollBounds = scrollElement.getBoundingClientRect();
-    const menuBounds = chatActions.getBoundingClientRect();
-    const top = Math.max(scrollBounds.top, menuBounds.bottom + 8) - chatBounds.top;
-    const bottom = scrollBounds.bottom - chatBounds.top;
-    const trackHeight = Math.max(0, bottom - top);
-    scrollBar.style.top = `${top}px`;
-    scrollBar.style.height = `${trackHeight}px`;
-
-    if (maxScroll <= 1 || trackHeight <= 0) {
-        scrollBar.classList.remove('visible');
-        scrollBar.tabIndex = -1;
-        return;
-    }
-
-    scrollBar.tabIndex = 0;
-    const thumbHeight = Math.min(
-        trackHeight,
-        Math.max(30, trackHeight * scrollElement.clientHeight / scrollElement.scrollHeight),
-    );
-    const thumbTravel = trackHeight - thumbHeight;
-    const progress = scrollElement.scrollTop / maxScroll;
-    scrollThumb.style.height = `${thumbHeight}px`;
-    scrollThumb.style.top = `${thumbTravel * progress}px`;
-    scrollBar.setAttribute('aria-valuenow', String(Math.round(progress * 1000)));
-}
-
-function showScrollBar() {
-    if (scrollElement.scrollHeight <= scrollElement.clientHeight + 1) return;
-    scrollBar.classList.add('visible');
-    if (scrollHideTimer) window.clearTimeout(scrollHideTimer);
-    scrollHideTimer = window.setTimeout(() => {
-        if (!scrollDragging && !scrollBar.matches(':focus-visible')) {
-            scrollBar.classList.remove('visible');
-        }
-    }, 900);
-}
-
-function setScrollFromPointer(clientY, centerThumb = false) {
-    const bounds = scrollBar.getBoundingClientRect();
-    const maxScroll = scrollElement.scrollHeight - scrollElement.clientHeight;
-    const thumbTravel = bounds.height - scrollThumb.offsetHeight;
-    if (maxScroll <= 0 || thumbTravel <= 0) return;
-    const offset = centerThumb ? scrollThumb.offsetHeight / 2 : scrollDragOffset;
-    const thumbTop = Math.max(0, Math.min(
-        thumbTravel,
-        clientY - bounds.top - offset,
-    ));
-    scrollElement.scrollTop = thumbTop / thumbTravel * maxScroll;
-}
+initializeScrollbar({
+    scrollElement,
+    scrollbar: scrollBar,
+    thumb: scrollThumb,
+    layoutTrack() {
+        const chatBounds = chatElement.getBoundingClientRect();
+        const scrollBounds = scrollElement.getBoundingClientRect();
+        const menuBounds = chatActions.getBoundingClientRect();
+        const top = Math.max(scrollBounds.top, menuBounds.bottom + 8) - chatBounds.top;
+        const bottom = scrollBounds.bottom - chatBounds.top;
+        const trackHeight = Math.max(0, bottom - top);
+        scrollBar.style.top = `${top}px`;
+        scrollBar.style.height = `${trackHeight}px`;
+    },
+    onScroll() {
+        if (isNearBottom(60)) userPinnedToBottom = true;
+    },
+    onPointerDown() {
+        userPinnedToBottom = false;
+    },
+    observe: [document.querySelector('.chat-content')],
+});
 
 function updatePromptScrollBar() {
     const maxScroll = input.scrollHeight - input.clientHeight;
@@ -337,52 +305,6 @@ scrollElement.addEventListener('touchmove', event => {
         }
     }
 }, { passive: true });
-
-scrollElement.addEventListener('scroll', () => {
-    if (isNearBottom(60)) {
-        userPinnedToBottom = true;
-    }
-    updateScrollBar();
-    showScrollBar();
-}, { passive: true });
-scrollBar.addEventListener('pointerdown', event => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    userPinnedToBottom = false;
-    scrollDragging = true;
-    scrollBar.setPointerCapture(event.pointerId);
-    const thumbBounds = scrollThumb.getBoundingClientRect();
-    const onThumb = event.target === scrollThumb;
-    scrollDragOffset = onThumb ? event.clientY - thumbBounds.top : scrollThumb.offsetHeight / 2;
-    if (!onThumb) setScrollFromPointer(event.clientY, true);
-    showScrollBar();
-});
-scrollBar.addEventListener('pointermove', event => {
-    if (scrollDragging) setScrollFromPointer(event.clientY);
-});
-const stopScrollDrag = () => {
-    if (!scrollDragging) return;
-    scrollDragging = false;
-    showScrollBar();
-};
-scrollBar.addEventListener('pointerup', stopScrollDrag);
-scrollBar.addEventListener('pointercancel', stopScrollDrag);
-scrollBar.addEventListener('keydown', event => {
-    const page = scrollElement.clientHeight * 0.85;
-    if (event.key === 'ArrowUp') scrollElement.scrollTop -= 40;
-    else if (event.key === 'ArrowDown') scrollElement.scrollTop += 40;
-    else if (event.key === 'PageUp') scrollElement.scrollTop -= page;
-    else if (event.key === 'PageDown') scrollElement.scrollTop += page;
-    else if (event.key === 'Home') scrollElement.scrollTop = 0;
-    else if (event.key === 'End') scrollElement.scrollTop = scrollElement.scrollHeight;
-    else return;
-    event.preventDefault();
-    showScrollBar();
-});
-window.addEventListener('resize', updateScrollBar);
-const scrollResizeObserver = new ResizeObserver(updateScrollBar);
-scrollResizeObserver.observe(scrollElement);
-scrollResizeObserver.observe(document.querySelector('.chat-content'));
 
 function removeLeadingSourceSection(content) {
     const lines = String(content).replace(/\r\n?/g, '\n').split('\n');

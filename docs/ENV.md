@@ -57,6 +57,13 @@ as if it belonged to every provider.
 The WebUI bridge is separate from the platform bridge used by Discord and
 Telegram.
 
+## SearXNG
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SEARXNG_VERSION` | `latest` | Docker image tag used by Compose for SearXNG. Pin a release tag for reproducible deployments. |
+| `SEARXNG_URL` | `http://searxng:8080` in Compose | SearXNG URL used by ZEUS for search and to check service availability in Settings → Information. |
+
 ## Database
 
 | Variable | Default | Description |

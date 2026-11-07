@@ -250,11 +250,13 @@ class ModelManager:
         provider = await self._provider_for(key[0])
         try:
             model_info = await provider.get_model(model_name)
-        except Exception:
-            log.exception(
-                "Could not fetch detailed metadata for model %s/%s.",
+        except httpx.HTTPError as error:
+            log.warning(
+                "Could not fetch detailed metadata for model %s/%s: %s. "
+                "Continuing with available model metadata.",
                 key[0],
                 model_name,
+                error,
             )
             model_info = None
 

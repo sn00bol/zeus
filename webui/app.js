@@ -139,6 +139,53 @@ function createWebUiServer({
                 response.end('ready');
                 return;
             }
+            if (request.method === 'GET' && url.pathname === '/version') {
+                sendStatic(response, path.join(ROOT, 'version'), 'text/plain; charset=utf-8');
+                return;
+            }
+            if (request.method === 'GET' && url.pathname === '/api/about') {
+                const version = fs.readFileSync(path.join(ROOT, 'version'), 'utf8').trim();
+                if (!version) throw new Error('The version file is empty.');
+
+                const [pythonResult, searxngResult] = await Promise.allSettled([
+                    callBridge('/about'),
+                    fetch(`${(process.env.SEARXNG_URL || 'http://localhost:8080').replace(/\/+$/, '')}/`, {
+                        headers: { 'X-Real-IP': '127.0.0.1' },
+                        signal: AbortSignal.timeout(3_000),
+                    }),
+                ]);
+                const searxngOnline = searxngResult.status === 'fulfilled'
+                    && searxngResult.value.ok;
+                if (!searxngOnline) {
+                    console.warn('[WEBUI] Could not check SearXNG status.');
+                }
+
+                sendJson(response, 200, {
+                    zeus: {
+                        value: version,
+                        status: 'online',
+                        detail: 'Application version',
+                    },
+                    searxng: {
+                        value: searxngOnline ? 'Available' : 'Unavailable',
+                        status: searxngOnline ? 'online' : 'offline',
+                        detail: 'SearXNG search service',
+                    },
+                    node: {
+                        version: process.version,
+                        status: 'online',
+                        detail: 'WebUI runtime',
+                    },
+                    python: {
+                        version: pythonResult.status === 'fulfilled'
+                            ? pythonResult.value.python_version || 'Unavailable'
+                            : 'Unavailable',
+                        status: pythonResult.status === 'fulfilled' ? 'online' : 'offline',
+                        detail: 'Inference runtime',
+                    },
+                });
+                return;
+            }
             if (request.method === 'GET' && url.pathname === '/') {
                 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
                     .replace('<meta name="zeus-boot-id" content="">', (
@@ -151,11 +198,34 @@ function createWebUiServer({
                 sendStatic(response, path.join(__dirname, 'ZEUSbanner.png'), 'image/png');
                 return;
             }
+            if (request.method === 'GET' && url.pathname === '/banner-background.png') {
+                sendStatic(response, path.join(__dirname, 'banner-background.png'), 'image/png');
+                return;
+            }
+            const projectDocMatch = url.pathname.match(/^\/project-docs\/(CONTRIBUTING|SECURITY|PRIVACY)\.md$/);
+            if (request.method === 'GET' && projectDocMatch) {
+                const fileName = `${projectDocMatch[1]}.md`;
+                const markdown = fs.readFileSync(path.join(ROOT, fileName), 'utf8');
+                sendContent(
+                    response,
+                    Buffer.from(markdown, 'utf8'),
+                    'text/markdown; charset=utf-8',
+                );
+                return;
+            }
+            if (request.method === 'GET' && url.pathname === '/font/Streetsign-Sans.otf') {
+                sendStatic(
+                    response,
+                    path.join(__dirname, 'font', 'Streetsign-Sans.otf'),
+                    'font/otf',
+                );
+                return;
+            }
             if (request.method === 'GET' && url.pathname === '/zeus.ico') {
                 sendStatic(response, path.join(__dirname, 'zeus.ico'), 'image/x-icon');
                 return;
             }
-            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|settings|sidebar|session|theme)\.js$/);
+            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|settings|sidebar|session|theme|scrollbar)\.js$/);
             if (request.method === 'GET' && assetMatch) {
                 sendStatic(
                     response,

@@ -1,4 +1,12 @@
+import { sanitizeHtml } from './renderHTML.js';
+import { initializeScrollbar } from './scrollbar.js';
+
 const SETTINGS_STYLE = `
+@font-face {
+    font-family: "Streetsign Sans";
+    src: url("/font/Streetsign-Sans.otf") format("opentype");
+    font-display: swap;
+}
 .settings-dialog {
     width: min(980px, calc(100vw - 32px));
     height: min(700px, calc(100dvh - 32px));
@@ -38,17 +46,70 @@ const SETTINGS_STYLE = `
 .settings-search-icon { position: absolute; top: 11px; left: 13px; width: 16px; height: 16px; object-fit: contain; filter: invert(.65); pointer-events: none; }
 .settings-search-wrap.search-open .settings-search { border-radius: 19px 19px 0 0; border-bottom-color: transparent; background: #1c1713; }
 .settings-search-results { position: absolute; z-index: 2; top: calc(100% - 1px); right: 0; left: 0; display: grid; gap: 3px; max-height: min(320px, 50vh); overflow: auto; padding: 5px; border: 1px solid #ffffff18; border-top: 0; border-radius: 0 0 19px 19px; background: #1c1713; box-shadow: 0 14px 32px #0009; }
+.settings-search-results.is-scrollable { padding-right: 34px; }
 .settings-search-results[hidden] { display: none; }
+.settings-search-results::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.settings-search-results { scrollbar-width: none; overscroll-behavior: contain; }
+.settings-search-wrap .chat-scrollbar { z-index: 3; right: 0; width: 30px; height: 0; }
 .settings-search-result { width: 100%; padding: 9px 10px; border: 0; border-radius: 6px; color: #e7e5e4; background: transparent; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
 .settings-search-result:hover, .settings-search-result:focus-visible { outline: 0; color: #ffedd5; background: #fb923c16; }
 .settings-search-empty { margin: 0; padding: 9px 10px; color: #a8a29e; font-size: 11px; }
 .settings-close { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border: 1px solid #ffffff12; border-radius: 9px; color: #a8a29e; background: #ffffff04; font: inherit; font-size: 24px; line-height: 1; cursor: pointer; }
 .settings-header > .settings-close { grid-column: 3; justify-self: end; }
 .settings-close:hover { color: #fff; background: #ffffff0d; }
-.settings-content { min-height: 0; flex: 1; overflow: auto; padding: 16px 20px; }
+.settings-content-wrap { min-height: 0; position: relative; flex: 1; display: flex; }
+.settings-content { min-height: 0; flex: 1; overflow: auto; padding: 16px 38px 16px 20px; }
+.settings-content-wrap > .chat-scrollbar { z-index: 2; top: 8px; right: 0; bottom: 8px; width: 30px; height: auto; }
 .settings-page[hidden] { display: none; }
 .settings-section-title { margin: 0 0 12px; color: #f5f5f4; font-size: 18px; font-weight: 600; }
 .settings-description { margin: 0; color: #928a83; font-size: 12px; line-height: 1.6; }
+.settings-version-banner { min-height: 280px; position: relative; overflow: hidden; border-radius: 18px; background: #f97316 url("/banner-background.png") center / cover no-repeat; container-type: inline-size; }
+.settings-version-banner::after { position: absolute; inset: 0; background: linear-gradient(270deg, rgba(234, 88, 12, .94), rgba(249, 115, 22, .58) 42%, transparent 82%); content: ""; pointer-events: none; }
+.settings-version-copy { position: absolute; z-index: 1; right: clamp(18px, 4vw, 40px); bottom: 0; display: grid; justify-items: end; gap: 2px; color: #431407; text-align: right; }
+.settings-version-value { font-family: "Streetsign Sans", sans-serif; font-size: clamp(72px, 24cqw, 192px); font-weight: 400; line-height: .9; letter-spacing: -.03em; }
+.settings-version-error { margin: 12px 0 0; color: #fda4af; font-size: 12px; }
+.settings-info-grid { width: min(100%, 760px); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; margin: 20px auto 0; }
+.settings-info-card { min-width: 0; display: grid; gap: 10px; padding: 20px; border: 1px solid #ffffff14; border-radius: 14px; background: linear-gradient(145deg, #ffffff0b, #ffffff04); box-shadow: inset 0 1px #ffffff08; }
+.settings-info-card-primary { min-height: 132px; align-content: center; }
+.settings-info-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #a8a29e; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.settings-info-card-logo { display: block; width: auto; max-width: min(100%, 112px); height: 30px; object-fit: contain; object-position: left center; }
+.settings-info-card-value { overflow-wrap: anywhere; color: #f5f5f4; font-size: 26px; font-weight: 650; letter-spacing: -.025em; }
+.settings-info-card-detail { min-height: 1.4em; color: #a8a29e; font-size: 11px; line-height: 1.4; }
+.settings-info-runtime { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; border: 1px solid #ffffff14; border-radius: 12px; background: #ffffff08; }
+.settings-info-runtime-item { min-width: 0; position: relative; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 16px; }
+.settings-info-runtime-item + .settings-info-runtime-item::before { position: absolute; top: 0; right: 16px; left: 16px; height: 1px; background: #ffffff18; content: ""; }
+.settings-info-runtime-name { min-width: 0; display: flex; align-items: center; }
+.settings-info-runtime-label { color: #a8a29e; font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.settings-info-runtime-value { overflow-wrap: anywhere; color: #d6d3d1; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.settings-info-project { margin-top: 12px; }
+.settings-info-project-item { width: 100%; appearance: none; -webkit-appearance: none; border: 0; border-radius: 0; box-shadow: none; color: inherit; background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.settings-info-project-item:hover { background: #ffffff0d; }
+.settings-info-project-item:focus { color: inherit; background: transparent; }
+.settings-info-project-item:active { background: #ffffff0d; }
+.settings-info-project-item:focus-visible { z-index: 1; outline: 2px solid #fdba74; outline-offset: -2px; background: #ffffff08; }
+.settings-info-project-arrow { color: #78716c; font-size: 18px; transition: transform .15s, color .15s; }
+.settings-info-project-item:hover .settings-info-project-arrow { color: #fdba74; transform: translateX(3px); }
+.settings-doc-dialog { width: min(760px, calc(100vw - 32px)); max-width: none; max-height: min(80dvh, 760px); padding: 0; overflow: hidden; border: 1px solid #ffffff18; border-radius: 16px; color: #edf0f7; background: #17120f; box-shadow: 0 32px 100px #000b; }
+.settings-doc-dialog::backdrop { background: #050403d9; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+.settings-doc-dialog-header { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid #ffffff12; background: #17120f; }
+.settings-doc-dialog-title { margin: 0; color: #f5f5f4; font-size: 16px; font-weight: 600; }
+.settings-doc-dialog-body { min-height: 0; position: relative; }
+.settings-doc-dialog-content { max-height: calc(80dvh - 60px); overflow: auto; padding: 18px 34px 24px 22px; color: #c4bcb5; font-size: 13px; line-height: 1.7; scrollbar-width: none; overscroll-behavior: contain; }
+.settings-doc-dialog-content::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.settings-doc-dialog .chat-scrollbar { z-index: 2; top: 8px; right: 0; bottom: 8px; width: 30px; height: auto; }
+.settings-doc-dialog-content h1, .settings-doc-dialog-content h2, .settings-doc-dialog-content h3 { margin: 18px 0 8px; color: #f5f5f4; font-size: 16px; }
+.settings-doc-dialog-content p, .settings-doc-dialog-content ul, .settings-doc-dialog-content ol, .settings-doc-dialog-content blockquote { margin: 8px 0; }
+.settings-doc-dialog-content a { color: #fdba74; }
+.settings-doc-dialog-content pre { overflow: auto; padding: 10px; border-radius: 7px; background: #0004; }
+.settings-doc-dialog-content code { font-size: .95em; }
+.settings-doc-dialog-content img { max-width: 100%; }
+.settings-info-license { margin: 18px 0 4px; color: #928a83; text-align: center; font-size: 11px; line-height: 1.6; }
+.settings-info-license a { color: #fdba74; text-decoration: underline; text-underline-offset: 3px; }
+.settings-page[data-page="information"].settings-info-enter .settings-version-banner { animation: settings-info-banner-in .65s cubic-bezier(.2, .8, .2, 1) both; }
+.settings-page[data-page="information"].settings-info-enter .settings-info-card { animation: settings-info-card-in .45s cubic-bezier(.2, .8, .2, 1) both; }
+.settings-page[data-page="information"].settings-info-enter .settings-info-card:nth-child(2) { animation-delay: .08s; }
+@keyframes settings-info-banner-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes settings-info-card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .settings-model-panel { padding: 0; }
 .settings-model-panel-heading-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .settings-model-panel-heading-row .settings-section-title { margin: 0; }
@@ -96,13 +157,15 @@ body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after 
     .settings-header { min-height: 58px; grid-template-columns: minmax(0, 1fr) minmax(34px, auto); padding: 9px 12px; }
     .settings-search-wrap { grid-column: 1; }
     .settings-header > .settings-close { grid-column: 2; }
-    .settings-content { padding: 14px 12px; }
+    .settings-content { padding: 14px 30px 14px 12px; }
     .settings-model-card { grid-template-columns: minmax(0, 1fr); }
     .settings-model-card-actions { justify-content: flex-start; }
 }
 @media (max-width: 380px) {
     .settings-shell { grid-template-columns: 116px minmax(0, 1fr); }
     .settings-nav { gap: 5px; font-size: 10px; }
+    .settings-info-grid { width: min(100%, 280px); grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .settings-info-card-primary { min-height: 100px; padding: 14px; }
 }
 `;
 
@@ -111,7 +174,7 @@ const SECTIONS = [
     { id: 'search', label: 'Search', icon: '/icon/search.png' },
     { id: 'appearance', label: 'Appearance', icon: '/icon/appearance.png' },
     { id: 'shortcuts', label: 'Shortcut', icon: '/icon/shortcut.png' },
-    { id: 'information', label: 'Information', icon: '/icon/info.png' },
+    { id: 'information', label: 'About ZEUS', icon: '/icon/info.png' },
 ];
 
 const SETTINGS_SEARCH_ITEMS = [
@@ -121,7 +184,7 @@ const SETTINGS_SEARCH_ITEMS = [
     { label: 'Compact interface', keywords: 'appearance compact spacing', section: 'appearance', target: '[data-setting="compact"]' },
     { label: 'Reduce motion', keywords: 'appearance animation transition', section: 'appearance', target: '[data-setting="motion"]' },
     { label: 'Shortcut', keywords: 'keyboard keys shortcut', section: 'shortcuts' },
-    { label: 'Information', keywords: 'about version information', section: 'information' },
+    { label: 'About ZEUS', keywords: 'about zeus version information', section: 'information' },
 ];
 
 function readPreference(key, fallback) {
@@ -172,14 +235,21 @@ export function initializeSettings({
                             <input class="settings-search" type="search" placeholder="Search settings..."
                                 aria-label="Search settings" aria-controls="settings-search-results"
                                 aria-expanded="false" autocomplete="off">
-                            <div class="settings-search-results" id="settings-search-results"
+                            <div class="settings-search-results chat-scroll" id="settings-search-results"
                                 role="listbox" hidden></div>
+                            <div class="chat-scrollbar" role="scrollbar" tabindex="-1"
+                                aria-label="Search results scroll position" aria-controls="settings-search-results"
+                                aria-orientation="vertical" aria-valuemin="0" aria-valuemax="1000"
+                                aria-valuenow="0">
+                                <div class="chat-scrollbar-thumb"></div>
+                            </div>
                         </div>
                         <button class="settings-close" type="button" aria-label="Close settings">
                             <span aria-hidden="true">×</span>
                         </button>
                     </header>
-                    <div class="settings-content">
+                    <div class="settings-content-wrap">
+                    <div class="settings-content chat-scroll" id="settings-content">
                         <section class="settings-page" data-page="models">
                             <section class="settings-model-panel">
                                 <div class="settings-model-panel-heading-row">
@@ -227,10 +297,98 @@ export function initializeSettings({
                         <section class="settings-page" data-page="shortcuts" hidden>
                             <h2 class="settings-section-title">Shortcut</h2>
                         </section>
-                        <section class="settings-page" data-page="information" hidden>
-                            <h2 class="settings-section-title">Information</h2>
+                        <section class="settings-page" data-page="information"
+                            aria-label="System information" hidden>
+                            <div class="settings-version-banner" aria-label="ZEUS version information">
+                                <div class="settings-version-copy">
+                                    <span class="settings-version-value" aria-live="polite">Loading...</span>
+                                </div>
+                            </div>
+                            <p class="settings-version-error" role="status" hidden>Could not load the ZEUS version.</p>
+                            <div class="settings-info-grid" aria-label="System information" aria-live="polite">
+                                <article class="settings-info-card settings-info-card-primary" data-info-card="zeus">
+                                    <div class="settings-info-card-heading">
+                                        <img class="settings-info-card-logo" src="/ZEUSbanner.png" alt="ZEUS">
+                                    </div>
+                                    <div class="settings-info-card-value">Loading...</div>
+                                    <div class="settings-info-card-detail">Application version</div>
+                                </article>
+                                <article class="settings-info-card settings-info-card-primary" data-info-card="searxng">
+                                    <div class="settings-info-card-heading">
+                                        <span>SearXNG</span>
+                                    </div>
+                                    <div class="settings-info-card-value">Loading...</div>
+                                    <div class="settings-info-card-detail">Search service status</div>
+                                </article>
+                                <div class="settings-info-runtime">
+                                    <div class="settings-info-runtime-item" data-info-runtime="node">
+                                        <span class="settings-info-runtime-name">
+                                            <span class="settings-info-runtime-label">Node.js</span>
+                                        </span>
+                                        <span class="settings-info-runtime-value">Loading...</span>
+                                    </div>
+                                    <div class="settings-info-runtime-item" data-info-runtime="python">
+                                        <span class="settings-info-runtime-name">
+                                            <span class="settings-info-runtime-label">Python</span>
+                                        </span>
+                                        <span class="settings-info-runtime-value">Loading...</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="settings-info-runtime settings-info-project" aria-label="Project documents">
+                                <button class="settings-info-runtime-item settings-info-project-item"
+                                    type="button" data-project-doc="CONTRIBUTING.md">
+                                    <span class="settings-info-runtime-name">
+                                        <span class="settings-info-runtime-label">Contributing</span>
+                                    </span>
+                                    <span class="settings-info-project-arrow" aria-hidden="true">›</span>
+                                </button>
+                                <button class="settings-info-runtime-item settings-info-project-item"
+                                    type="button" data-project-doc="SECURITY.md">
+                                    <span class="settings-info-runtime-name">
+                                        <span class="settings-info-runtime-label">Security</span>
+                                    </span>
+                                    <span class="settings-info-project-arrow" aria-hidden="true">›</span>
+                                </button>
+                                <button class="settings-info-runtime-item settings-info-project-item"
+                                    type="button" data-project-doc="PRIVACY.md">
+                                    <span class="settings-info-runtime-name">
+                                        <span class="settings-info-runtime-label">Privacy</span>
+                                    </span>
+                                    <span class="settings-info-project-arrow" aria-hidden="true">›</span>
+                                </button>
+                            </div>
+                            <p class="settings-info-license">
+                                ZEUS is powered GNU GPL v3.0 License, for more information
+                                <a href="https://www.gnu.org/licenses/gpl-3.0"
+                                    target="_blank" rel="noopener noreferrer">click here</a>.
+                            </p>
                         </section>
                     </div>
+                    <div class="chat-scrollbar" role="scrollbar" tabindex="-1"
+                        aria-label="Settings page scroll position" aria-controls="settings-content"
+                        aria-orientation="vertical" aria-valuemin="0" aria-valuemax="1000"
+                        aria-valuenow="0">
+                        <div class="chat-scrollbar-thumb"></div>
+                    </div>
+                    </div>
+                    <dialog class="settings-doc-dialog" aria-labelledby="settings-doc-dialog-title">
+                        <header class="settings-doc-dialog-header">
+                            <h2 class="settings-doc-dialog-title" id="settings-doc-dialog-title"></h2>
+                            <button class="settings-close settings-doc-dialog-close" type="button"
+                                aria-label="Close document">×</button>
+                        </header>
+                        <div class="settings-doc-dialog-body">
+                            <div class="settings-doc-dialog-content chat-scroll" id="settings-doc-dialog-content"
+                                aria-live="polite"></div>
+                            <div class="chat-scrollbar" role="scrollbar" tabindex="-1"
+                                aria-label="Document scroll position" aria-controls="settings-doc-dialog-content"
+                                aria-orientation="vertical" aria-valuemin="0" aria-valuemax="1000"
+                                aria-valuenow="0">
+                                <div class="chat-scrollbar-thumb"></div>
+                            </div>
+                        </div>
+                    </dialog>
                 </section>
             </div>
         </dialog>
@@ -244,6 +402,45 @@ export function initializeSettings({
     const catalogRefreshButton = dialog.querySelector('.settings-catalog-refresh');
     const settingsSearch = dialog.querySelector('.settings-search');
     const searchResults = dialog.querySelector('.settings-search-results');
+    const searchResultsScrollbar = dialog.querySelector('.settings-search-wrap .chat-scrollbar');
+    const searchResultsScroll = initializeScrollbar({
+        scrollElement: searchResults,
+        scrollbar: searchResultsScrollbar,
+        thumb: searchResultsScrollbar.querySelector('.chat-scrollbar-thumb'),
+        layoutTrack() {
+            const resultsBounds = searchResults.getBoundingClientRect();
+            const wrapBounds = settingsSearch.parentElement.getBoundingClientRect();
+            searchResultsScrollbar.style.top = `${resultsBounds.top - wrapBounds.top}px`;
+            searchResultsScrollbar.style.height = `${resultsBounds.height}px`;
+        },
+        onScrollableChange(isScrollable) {
+            searchResults.classList.toggle('is-scrollable', isScrollable);
+        },
+        observe: [settingsSearch.parentElement],
+    });
+    const settingsContent = dialog.querySelector('.settings-content');
+    const settingsScrollbar = dialog.querySelector('.settings-content-wrap > .chat-scrollbar');
+    const settingsContentScroll = initializeScrollbar({
+        scrollElement: settingsContent,
+        scrollbar: settingsScrollbar,
+        thumb: settingsScrollbar.querySelector('.chat-scrollbar-thumb'),
+        observe: [...settingsContent.querySelectorAll('.settings-page'), modelList],
+    });
+    const versionValue = dialog.querySelector('.settings-version-value');
+    const versionError = dialog.querySelector('.settings-version-error');
+    const infoCards = dialog.querySelectorAll('[data-info-card]');
+    const infoRuntimeItems = dialog.querySelectorAll('[data-info-runtime]');
+    const projectDocs = dialog.querySelectorAll('[data-project-doc]');
+    const projectDocDialog = dialog.querySelector('.settings-doc-dialog');
+    const projectDocTitle = dialog.querySelector('.settings-doc-dialog-title');
+    const projectDocContent = dialog.querySelector('.settings-doc-dialog-content');
+    const projectDocScrollbar = dialog.querySelector('.settings-doc-dialog .chat-scrollbar');
+    const projectDocScrollbarThumb = projectDocScrollbar.querySelector('.chat-scrollbar-thumb');
+    const projectDocScroll = initializeScrollbar({
+        scrollElement: projectDocContent,
+        scrollbar: projectDocScrollbar,
+        thumb: projectDocScrollbarThumb,
+    });
     let catalogModels = [];
     let searchEnabled = readPreference('zeus.webui.search_tool', true);
     const preferences = {
@@ -253,6 +450,75 @@ export function initializeSettings({
 
     function setToggle(button, checked) {
         button.setAttribute('aria-checked', String(checked));
+    }
+
+    projectDocDialog.addEventListener('close', () => {
+        projectDocScroll.hide();
+    });
+
+    for (const doc of projectDocs) {
+        doc.addEventListener('click', async () => {
+            projectDocTitle.textContent = {
+                'CONTRIBUTING.md': 'Contributing',
+                'SECURITY.md': 'Security',
+                'PRIVACY.md': 'Privacy',
+            }[doc.dataset.projectDoc];
+            projectDocContent.textContent = 'Loading document...';
+            projectDocDialog.showModal();
+            try {
+                const response = await fetch(`/project-docs/${encodeURIComponent(doc.dataset.projectDoc)}`);
+                if (!response.ok) throw new Error(`Request failed (${response.status}).`);
+                const markdown = await response.text();
+                if (typeof globalThis.markdownit !== 'function') {
+                    throw new Error('Markdown renderer is unavailable.');
+                }
+                const rendered = globalThis.markdownit({
+                    html: false,
+                    linkify: false,
+                    breaks: true,
+                }).render(markdown);
+                projectDocContent.innerHTML = sanitizeHtml(rendered);
+                projectDocScroll.update();
+            } catch (error) {
+                console.error(`Could not load ${doc.dataset.projectDoc}:`, error);
+                projectDocContent.textContent = `Could not load document: ${error.message}`;
+            }
+        });
+    }
+    dialog.querySelector('.settings-doc-dialog-close').addEventListener('click', () => (
+        projectDocDialog.close()
+    ));
+
+    async function loadSystemInfo() {
+        try {
+            const response = await fetch('/api/about');
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || `Request failed (${response.status}).`);
+            if (!result.zeus?.value) throw new Error('The ZEUS version is missing from system information.');
+            versionValue.textContent = result.zeus.value;
+            versionError.hidden = true;
+            for (const card of infoCards) {
+                const info = result[card.dataset.infoCard];
+                card.querySelector('.settings-info-card-value').textContent = info.value;
+                card.querySelector('.settings-info-card-detail').textContent = info.detail;
+            }
+            for (const item of infoRuntimeItems) {
+                item.querySelector('.settings-info-runtime-value').textContent = (
+                    result[item.dataset.infoRuntime].version
+                );
+            }
+        } catch (error) {
+            console.error('Could not load system information:', error);
+            versionValue.textContent = 'Unavailable';
+            versionError.hidden = false;
+            for (const card of infoCards) {
+                card.querySelector('.settings-info-card-value').textContent = 'Unavailable';
+                card.querySelector('.settings-info-card-detail').textContent = 'Could not load system information.';
+            }
+            for (const item of infoRuntimeItems) {
+                item.querySelector('.settings-info-runtime-value').textContent = 'Unavailable';
+            }
+        }
     }
 
     function applyAppearance() {
@@ -370,10 +636,18 @@ export function initializeSettings({
         for (const page of dialog.querySelectorAll('.settings-page')) {
             page.hidden = page.dataset.page !== sectionId;
         }
+        const informationPage = dialog.querySelector('[data-page="information"]');
+        informationPage.classList.remove('settings-info-enter');
+        if (sectionId === 'information') {
+            void informationPage.offsetWidth;
+            informationPage.classList.add('settings-info-enter');
+            void loadSystemInfo();
+        }
     }
 
     function closeSearchResults() {
         searchResults.hidden = true;
+        searchResultsScroll.update();
         settingsSearch.setAttribute('aria-expanded', 'false');
         settingsSearch.parentElement.classList.remove('search-open');
     }
@@ -411,6 +685,7 @@ export function initializeSettings({
             }
         }
         searchResults.hidden = false;
+        searchResultsScroll.update();
         settingsSearch.setAttribute('aria-expanded', 'true');
         settingsSearch.parentElement.classList.add('search-open');
     }

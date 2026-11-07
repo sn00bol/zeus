@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 from typing import Any
 
 try:
@@ -105,6 +106,11 @@ class WebUiBridge:
         path = scope["path"]
         if method == "GET" and path == "/health":
             await _send_json(send, {"status": "ok"})
+            return
+        if method == "GET" and path == "/about":
+            await _send_json(send, {
+                "python_version": ".".join(str(part) for part in sys.version_info[:3]),
+            })
             return
         if method == "GET" and path == "/models":
             await _send_json(send, {"models": await _router.available_models()})

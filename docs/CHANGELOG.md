@@ -13,3 +13,4 @@ What changed:
 - Add some commands for discord/telegram platform: `home`, `model`, `new`, `reset`, `restart`, `retry`, `status`, `stop`, `usage`
 - Fix, upgrade WebUI render and sidebar ([796cd37](https://github.com/sn00bol/zeus/commit/796cd37031f45dd37466ea877eb6dbdd4d60ec4f))
 - Fix WebUI AI Model thinking bugs ([bcecfce](https://github.com/sn00bol/zeus/commit/bcecfce19d6f808c967ee03b0833cf84958f1fd3))
+- Fix postgressql bug WebUI server exited during startup ([2626433](https://github.com/sn00bol/zeus/commit/2626433cf1c83059e29c7b1342437443b214cb43))
