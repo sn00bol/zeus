@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v1.0.0 - 10.31.2026
+## v1.0.0 - 11.31.2026
 Release note:
 
 This version currently work perfectly on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb" and always required WebUI as default
