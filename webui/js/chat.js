@@ -114,8 +114,7 @@ function setTempChatMode(active) {
             : 'Temporary chat';
     }
     if (chatMoreButton) {
-        // Temp chat always allows options (e.g., delete), but empty chats typically don't
-        chatMoreButton.hidden = !isTempChat && (messagesElement.childElementCount === 0);
+        chatMoreButton.hidden = messagesElement.childElementCount === 0;
     }
 }
 
@@ -136,6 +135,7 @@ if (tempChatButton) {
                 messagesElement.replaceWith(tempContainer);
                 messagesElement = tempContainer;
             }
+            if (chatMoreButton) chatMoreButton.hidden = true;
             welcomeElement.hidden = false;
             document.getElementById('welcome-text').textContent = 'Temporary chat';
             document.getElementById('welcome-subtitle').hidden = false;

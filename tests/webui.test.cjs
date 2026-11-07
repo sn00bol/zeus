@@ -332,8 +332,10 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.menubar-brand img \{ filter: grayscale\(1\) brightness\(\.55\); \}/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle img,[\s\S]*?filter: brightness\(0\);/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 10%, #ffffff\);/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 16%, #242424\);/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: #0000000a;/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 18%, #191919\);/);
+        assert.match(theme.body.toString('utf8'), /\.menu-toggle \{[^}]*appearance: none;[^}]*background: transparent;/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover \.sidebar-icon,[\s\S]*?filter: brightness\(0\);/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.app\.menu-closed \.collapsed-icon-img/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.message\.user \.message-body/);
@@ -415,6 +417,9 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.equal(chat.status, 200);
         assert.match(chat.body.toString('utf8'), /textContent = 'Manage models\.\.\.'/);
         assert.match(chat.body.toString('utf8'), /settings\?\.openSection\('models'\)/);
+        assert.match(chat.body.toString('utf8'), /chatMoreButton\.hidden = messagesElement\.childElementCount === 0/);
+        assert.match(chat.body.toString('utf8'), /messagesElement = tempContainer;[\s\S]{0,80}chatMoreButton\.hidden = true/);
+        assert.match(chat.body.toString('utf8'), /if \(chatMoreButton\) chatMoreButton\.hidden = false;\s*\n\s*try \{/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search,[\s\S]*?background: #ffffff/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search::placeholder/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.search-result-item \{ color: #404040; \}/);

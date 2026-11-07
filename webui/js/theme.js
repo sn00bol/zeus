@@ -51,7 +51,7 @@ const themeStyles = String.raw`
         .sidebar-settings-button { position: absolute; z-index: 23; right: 14px; bottom: 14px; width: 36px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 9px; background: transparent; cursor: pointer; }
         .menubar-brand { position: absolute; left: 17px; width: 88px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; cursor: pointer; opacity: 1; transform: translateX(0); transition: opacity .14s ease, transform .2s ease; }
         .menubar-brand img { display: block; width: 100%; height: auto; }
-        .menu-toggle { position: absolute; right: 17px; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 9px; color: #d4d8e2; background: transparent; cursor: pointer; transition: right .22s ease, background-color .15s ease, border-color .15s ease, color .15s ease; }
+        .menu-toggle { position: absolute; right: 17px; width: 34px; height: 34px; display: grid; place-items: center; appearance: none; -webkit-appearance: none; border: 1px solid transparent; border-radius: 9px; color: #d4d8e2; background: transparent; box-shadow: none; cursor: pointer; transition: right .22s ease, background-color .15s ease, border-color .15s ease, color .15s ease; }
         .sidebar-content { position: absolute; inset: 66px auto 0 0; width: 250px; overflow: hidden; padding: 10px 12px 14px; display: flex; flex-direction: column; gap: 14px; opacity: 1; transform: translateX(0); transition: opacity .14s ease .06s, transform .22s ease; }
         .app.menu-closed .sidebar { width: 56px; }
         .app.menu-closed .sidebar-settings-button { right: 10px; bottom: 12px; width: 36px; height: 36px; }
@@ -818,7 +818,7 @@ const themeStyles = String.raw`
         body:not(.temp-chat-mode)[data-theme-mode="dark"] .settings-action:focus-visible,
         body:not(.temp-chat-mode)[data-theme-mode="light"] .settings-switch:focus-visible,
         body:not(.temp-chat-mode)[data-theme-mode="dark"] .settings-switch:focus-visible { outline-color: var(--user-accent); }
-        .sidebar-settings-button, .temp-chat-button, .chat-more-button { transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+        .sidebar-settings-button, .temp-chat-button, .chat-more-button { appearance: none; -webkit-appearance: none; box-shadow: none; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
         body[data-theme-mode="light"] .menu-toggle img,
         body[data-theme-mode="light"] .sidebar-settings-button img { filter: brightness(0); }
         body[data-theme-mode="dark"] .menu-toggle img,
@@ -835,7 +835,10 @@ const themeStyles = String.raw`
         body[data-theme-mode="light"] .chat-more-button:hover,
         body[data-theme-mode="light"] .chat-more-button:focus-visible,
         body[data-theme-mode="light"] .chat-more-button:active,
-        body[data-theme-mode="light"] .chat-more-button[aria-expanded="true"] { color: #171717; border-color: color-mix(in srgb, var(--user-accent) 24%, #d4d4d4); background: color-mix(in srgb, var(--user-accent) 10%, #ffffff); }
+        body[data-theme-mode="light"] .chat-more-button[aria-expanded="true"] { color: #171717; border-color: transparent; background: #0000000a; }
+        body[data-theme-mode="light"] .menu-toggle:hover .sidebar-icon,
+        body[data-theme-mode="light"] .menu-toggle:focus-visible .sidebar-icon,
+        body[data-theme-mode="light"] .menu-toggle:active .sidebar-icon { filter: brightness(0); }
         body[data-theme-mode="dark"] .menu-toggle:hover,
         body[data-theme-mode="dark"] .menu-toggle:focus-visible,
         body[data-theme-mode="dark"] .menu-toggle:active,
@@ -848,7 +851,7 @@ const themeStyles = String.raw`
         body[data-theme-mode="dark"] .chat-more-button:hover,
         body[data-theme-mode="dark"] .chat-more-button:focus-visible,
         body[data-theme-mode="dark"] .chat-more-button:active,
-        body[data-theme-mode="dark"] .chat-more-button[aria-expanded="true"] { color: #ffffff; border-color: color-mix(in srgb, var(--user-accent) 30%, #525252); background: color-mix(in srgb, var(--user-accent) 16%, #242424); }
+        body[data-theme-mode="dark"] .chat-more-button[aria-expanded="true"] { color: #ffffff; border-color: transparent; background: color-mix(in srgb, var(--user-accent) 18%, #191919); }
 `;
 
 const style = document.createElement('style');
