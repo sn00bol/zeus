@@ -480,7 +480,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle img,[\s\S]*?filter: brightness\(0\);/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: #0000000a;/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 18%, #191919\);/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: #ffffff0c;/);
         assert.match(theme.body.toString('utf8'), /\.menu-toggle \{[^}]*appearance: none;[^}]*background: transparent;/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover \.sidebar-icon,[\s\S]*?filter: brightness\(0\);/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
@@ -600,6 +600,11 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /background:\s*var\(--user-background\)/);
         assert.match(theme.body.toString('utf8'), /background:\s*var\(--user-sidebar\)/);
         assert.match(theme.body.toString('utf8'), /color:\s*var\(--user-foreground\)/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.sidebar-search-btn:hover \{ color: #ffffff; background: #ffffff0c; \}/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.chat-more-button\[aria-expanded="true"\] \{ color: #ffffff; border-color: transparent; background: #ffffff0c; \}/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.conversation-rename-input \{ color: #262626; \}/);
+        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode\[data-theme-mode="light"\] \{ color-scheme: dark; background: #000000; color: #ededed; \}/);
+        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.app\.menu-closed \.sidebar,[\s\S]*?background: #000000; border-right-color: #222222;/);
         assert.match(settings.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-switch/);
         assert.match(settings.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.settings-model-badge/);
         assert.match(settings.body.toString('utf8'), /aria-label="Settings page scroll position"/);
