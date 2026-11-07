@@ -165,7 +165,7 @@ const themeStyles = String.raw`
         @keyframes appear { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         .message-body { min-width: 0; max-width: 100%; padding-top: 1px; }
         .message.user { justify-content: flex-end; }
-        .message.user .message-body { max-width: min(78%, 620px); padding: 11px 15px 0; border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 999px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, transparent), #ffffff08); color: #edf0f7; }
+        .message.user .message-body { max-width: min(78%, 620px); padding: 11px 15px 0; border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 14px; background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 14%, transparent), #ffffff08); color: #edf0f7; }
         .message-content { color: var(--user-foreground); font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
         .message.user .message-content { color: #fff7ed; white-space: pre-wrap; }
         .message-content > :first-child { margin-top: 0; }
