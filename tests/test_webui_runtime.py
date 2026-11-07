@@ -365,7 +365,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertNotIn("think", payload)
 
-    async def test_router_streams_deltas_and_collects_final_usage_without_buffering_chunks(self) -> None:
+    async def test_router_streams_deltas_and_preserves_ollama_model_alias(self) -> None:
         from core.model import ModelContext
 
         class FakeProvider:
@@ -377,7 +377,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
                 return ModelContext(
                     provider_name="ollama",
                     provider=FakeProvider(),
-                    model_name="test-model",
+                    model_name="gemma4:31b-cloud",
                     messages=[{"role": "user", "content": "hello"}],
                 )
 
@@ -387,7 +387,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
 
             async def aiter_lines(self) -> object:
                 for line in (
-                    'data: {"model":"actual-model","choices":[{"delta":{"reasoning":"plan","content":""},"finish_reason":null}]}',
+                    'data: {"model":"gemma4:31b","choices":[{"delta":{"reasoning":"plan","content":""},"finish_reason":null}]}',
                     'data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}',
                     'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":1}}',
                     "data: [DONE]",
@@ -438,12 +438,24 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(thoughts, ["plan"])
         self.assertEqual(result.content, "Hi")
         self.assertEqual(result.thinking, "plan")
-        self.assertEqual(result.model, "actual-model")
+        self.assertEqual(result.model, "gemma4:31b-cloud")
         self.assertEqual(result.prompt_tokens, 4)
         self.assertEqual(result.completion_tokens, 1)
         self.assertEqual(client.call[0], "POST")
         self.assertEqual(client.call[1], "http://model/v1/chat/completions")
         self.assertEqual(client.call[2]["json"]["reasoning_effort"], "none")
+
+    def test_parse_response_preserves_ollama_model_alias(self) -> None:
+        response = Router._parse_response(
+            {
+                "model": "gemma4:31b",
+                "choices": [{"message": {"content": "Title"}}],
+            },
+            "ollama",
+            "gemma4:31b-cloud",
+        )
+
+        self.assertEqual(response.model, "gemma4:31b-cloud")
 
     async def test_router_enables_thinking_and_strips_think_tags_for_heavy_prompts(self) -> None:
         from core.model import ModelContext

@@ -158,6 +158,52 @@ class RouterDispatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(history[0].data["from_provider"], "primary_failing")
         self.assertEqual(history[0].data["to_provider"], "secondary_healthy")
 
+    async def test_strict_model_requests_do_not_use_search_or_fail_over(self) -> None:
+        class FakeModelManager:
+            async def available_providers(self) -> list[str]:
+                return ["ollama", "lmstudio"]
+
+            async def resolve(self, request: InferenceRequest) -> SimpleNamespace:
+                return SimpleNamespace(
+                    provider_name=request.provider_name,
+                    model_name=request.model,
+                    provider=request.provider_name,
+                    messages=request.messages,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                    api_token=None,
+                    context_length=4096,
+                    search_results=[],
+                )
+
+        router = Router(model_manager=FakeModelManager())  # type: ignore[arg-type]
+        router._get_client = AsyncMock(return_value=object())  # type: ignore[method-assign]
+        router._call_backend = AsyncMock(return_value={"content": "title"})  # type: ignore[method-assign]
+        router._record_response = AsyncMock()  # type: ignore[method-assign]
+        router._plan_search = AsyncMock(  # type: ignore[method-assign]
+            side_effect=AssertionError("Strict title requests must not invoke search planning."),
+        )
+        router._parse_response = lambda _raw, provider, model: InferenceResponse(  # type: ignore[method-assign]
+            content="title",
+            provider=provider,
+            model=model,
+        )
+
+        result = await router.route(InferenceRequest(
+            messages=[Message(role="user", content="Summarize this conversation.")],
+            provider_name="ollama",
+            model="title-model",
+            temperature=0.1,
+            max_tokens=48,
+            extra={"strict_model": True, "think": False},
+        ))
+
+        self.assertEqual(result.provider, "ollama")
+        self.assertEqual(result.model, "title-model")
+        self.assertEqual(router._call_backend.await_count, 1)
+        self.assertEqual(router._call_backend.await_args.kwargs["model_id"], "title-model")
+        self.assertEqual(router._call_backend.await_args.kwargs["extra"], {"think": False})
+
 
 class DatabaseInMemoryFallbackTests(unittest.IsolatedAsyncioTestCase):
     async def test_in_memory_fallback_sessions_and_messages(self) -> None:

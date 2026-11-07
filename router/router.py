@@ -447,6 +447,7 @@ class Router:
         req_messages = getattr(request, "messages", [])
         req_stream = getattr(request, "stream", False)
         req_extra = getattr(request, "extra", {})
+        strict_model = req_extra.get("strict_model") is True
 
         await self.broker.publish(
             "inference.started",
@@ -463,11 +464,16 @@ class Router:
             planning_extra.pop("tools", None)
             planning_extra.pop("search_query", None)
             planning_extra.pop("search_skill", None)
+            planning_extra.pop("strict_model", None)
             planning_request = self._request_with_extra(request, planning_extra)
             context = await self.model_manager.resolve(planning_request)
             client = await self._get_client()
-            request, context = await self._plan_search(request, context, client)
-            req_extra = request.extra
+            if strict_model:
+                request = self._request_with_extra(request, planning_extra)
+                req_extra = request.extra
+            else:
+                request, context = await self._plan_search(request, context, client)
+                req_extra = request.extra
 
             # Analyze complexity and decide provider candidates
             decision = await self.dispatcher.dispatch(
@@ -475,8 +481,12 @@ class Router:
                 requested_provider=req_provider or context.provider_name,
                 requested_model=req_model or context.model_name,
             )
+            if strict_model:
+                decision.fallback_providers.clear()
 
             async def _execute_provider(p_name: str, m_name: str | None) -> tuple[dict[str, Any], ModelContext]:
+                if strict_model and (p_name != req_provider or m_name != req_model):
+                    raise RuntimeError("The requested provider/model is unavailable.")
                 if p_name == context.provider_name and (m_name is None or m_name == context.model_name):
                     active_context = context
                 else:
@@ -497,6 +507,11 @@ class Router:
                         active_context,
                         client,
                     )
+                if strict_model and (
+                    active_context.provider_name != req_provider
+                    or active_context.model_name != req_model
+                ):
+                    raise RuntimeError("The requested provider/model is unavailable.")
 
                 explicit_think = req_extra.get("think")
                 if explicit_think is True or explicit_think in ("true", "True", "1", "on"):
@@ -781,8 +796,50 @@ class Router:
             json=payload,
             headers=headers,
         )
+        if provider.name == "ollama" and getattr(resp, "status_code", None) == 404:
+            options: dict[str, Any] = {}
+            if temperature is not None:
+                options["temperature"] = temperature
+            if max_tokens is not None:
+                options["num_predict"] = max_tokens
+            native_payload: dict[str, Any] = {
+                "model": model_id,
+                "messages": messages,
+                "stream": False,
+                "options": options,
+                "think": think,
+            }
+            resp = await client.post(
+                f"{provider.endpoint.base_url.rstrip('/')}/api/chat",
+                json=native_payload,
+                headers=headers,
+            )
+        if provider.name == "ollama" and getattr(resp, "status_code", None) == 404:
+            try:
+                error_data = resp.json()
+            except ValueError:
+                error_data = None
+            if isinstance(error_data, dict):
+                detail = error_data.get("error")
+                if isinstance(detail, str) and detail:
+                    raise RuntimeError(
+                        f"Ollama could not run model '{model_id}': {detail}"
+                    )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        if provider.name == "ollama" and "message" in data:
+            return {
+                "model": data.get("model", model_id),
+                "choices": [{
+                    "message": data.get("message", {}),
+                    "finish_reason": data.get("done_reason", "stop"),
+                }],
+                "usage": {
+                    "prompt_tokens": data.get("prompt_eval_count", 0),
+                    "completion_tokens": data.get("eval_count", 0),
+                },
+            }
+        return data
 
     @staticmethod
     async def _stream_backend(
@@ -855,7 +912,8 @@ class Router:
                 if "error" in chunk:
                     detail = chunk["error"]
                     raise RuntimeError(f"The model stream failed: {detail}")
-                actual_model = str(chunk.get("model") or actual_model)
+                if provider.name != "ollama":
+                    actual_model = str(chunk.get("model") or actual_model)
                 chunk_usage = chunk.get("usage")
                 if isinstance(chunk_usage, dict):
                     for key in usage:
@@ -926,7 +984,7 @@ class Router:
         usage: dict[str, Any] = raw.get("usage", {})
         return InferenceResponse(
             content=content,
-            model=raw.get("model", model),
+            model=model if provider == "ollama" else raw.get("model", model),
             provider=provider,
             prompt_tokens=usage.get("prompt_tokens", 0),
             completion_tokens=usage.get("completion_tokens", 0),

@@ -81,6 +81,9 @@ const themeStyles = String.raw`
         .conversation-item { min-width: 0; flex: 1; display: flex; align-items: center; gap: 7px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; border: 0; border-radius: 8px; padding: 9px 8px 9px 10px; color: #a3aaba; background: transparent; font-size: 12px; cursor: pointer; }
         .conversation-title { overflow: hidden; text-overflow: ellipsis; }
         .conversation-title-spinner { width: 11px; height: 11px; flex: none; border: 1.5px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
+        .conversation-title-generating { min-width: 62px; max-width: 112px; height: 12px; overflow: hidden; border-radius: 4px; color: transparent; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent) 20%, color-mix(in srgb, var(--accent) 30%, transparent) 45%, color-mix(in srgb, var(--accent) 8%, transparent) 70%); background-size: 220% 100%; animation: conversation-title-shimmer 1.25s ease-in-out infinite; }
+        @keyframes conversation-title-shimmer { from { background-position: 100% 0; } to { background-position: -120% 0; } }
+        @media (prefers-reduced-motion: reduce) { .conversation-title-generating { animation: none; background-position: 50% 0; } }
         .conversation-row:hover .conversation-item, .conversation-row:focus-within .conversation-item { color: #e5e7eb; }
         .conversation-rename-form { position: relative; min-width: 0; flex: 1; display: flex; align-items: center; padding: 4px; }
         .conversation-rename-input { min-width: 0; flex: 1; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 6px; outline: 0; padding: 6px 7px; color: #edf0f7; background: transparent; font: inherit; font-size: 11px; }
@@ -774,6 +777,8 @@ const themeStyles = String.raw`
         body:not(.temp-chat-mode)[data-theme-mode="dark"] .table-wrapper:focus-visible { outline-color: var(--user-accent); }
         body:not(.temp-chat-mode)[data-theme-mode="light"] .conversation-title-spinner,
         body:not(.temp-chat-mode)[data-theme-mode="dark"] .conversation-title-spinner,
+        body:not(.temp-chat-mode)[data-theme-mode="light"] .conversation-title-generating,
+        body:not(.temp-chat-mode)[data-theme-mode="dark"] .conversation-title-generating,
         body:not(.temp-chat-mode)[data-theme-mode="light"] .loading-spinner,
         body:not(.temp-chat-mode)[data-theme-mode="dark"] .loading-spinner { border-top-color: var(--user-accent); }
         body:not(.temp-chat-mode)[data-theme-mode="light"] .conversation-title-spinner,

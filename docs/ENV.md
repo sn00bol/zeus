@@ -57,6 +57,16 @@ as if it belonged to every provider.
 The WebUI bridge is separate from the platform bridge used by Discord and
 Telegram.
 
+Conversation titles are generated after the first response has completed, so
+title inference does not delay the chat response. ZEUS uses the same provider
+and model that produced the chat response, whether selected by the user or
+automatically by ZEUS. The sidebar shows an animated title placeholder while
+generation is pending and refreshes automatically. User-renamed titles are
+never replaced. If generation fails, ZEUS uses the default title.
+The title, its `title_status` (`pending`, `generated`, or `failed`), and its
+`title_source` (`default`, `ai`, or `user`) are stored in the conversation's
+existing `chat_sessions.metadata` JSONB field.
+
 ## SearXNG
 
 | Variable | Default | Description |

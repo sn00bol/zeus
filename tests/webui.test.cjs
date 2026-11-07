@@ -3,8 +3,12 @@ const { EventEmitter } = require('node:events');
 const http = require('node:http');
 const test = require('node:test');
 
-const { conversationTitleFromPrompt, createWebUiServer } = require('../webui/app');
+const { createWebUiServer } = require('../webui/app');
 const { StreamManager } = require('../webui/streamManager');
+const {
+    createTitleGenerationService,
+    normalizeGeneratedTitle,
+} = require('../webui/js/title');
 
 test('server-side streams outlive SSE subscribers and replay bounded buffered events', async () => {
     const manager = new StreamManager({
@@ -55,14 +59,50 @@ test('server-side streams outlive SSE subscribers and replay bounded buffered ev
     assert.equal(runs, 1);
 });
 
-test('conversation titles are immediate and concise for long prompts', () => {
-    assert.equal(conversationTitleFromPrompt('hỏi thời tiết hôm nay'), 'Hỏi thời tiết hôm nay');
-    const title = conversationTitleFromPrompt(
-        'Please help me plan a detailed migration from PostgreSQL to SQLite while preserving all existing user data and indexes.',
+test('title generation uses the same automatically selected or user-selected chat model', async () => {
+    let requestOptions;
+    const requestRoutes = [];
+    const generateTitle = createTitleGenerationService({
+        request: async (route, options) => {
+            requestRoutes.push(route);
+            assert.equal(route, '/infer');
+            requestOptions = options;
+            return { content: 'Title: "FastAPI JWT REST API"' };
+        },
+    });
+
+    assert.equal(await generateTitle({
+        message: 'Write a REST API using FastAPI with JWT authentication.',
+        provider: 'lmstudio',
+        model: 'selected-by-user',
+    }), 'FastAPI JWT REST API');
+    assert.equal(requestOptions.timeoutMs, 15_000);
+    assert.equal(requestOptions.body.provider, 'lmstudio');
+    assert.equal(requestOptions.body.model, 'selected-by-user');
+    assert.equal(requestOptions.body.stream, false);
+    assert.equal(requestOptions.body.temperature, 0.1);
+    assert.equal(requestOptions.body.max_tokens, 48);
+    assert.equal(requestOptions.body.think, false);
+    assert.equal(requestOptions.body.strict_model, true);
+    assert.deepEqual(requestOptions.body.messages.map(message => message.role), ['system', 'user']);
+    assert.match(requestOptions.body.messages[0].content, /only a greeting or has no substantive intent/i);
+    assert.equal(normalizeGeneratedTitle('```text\nPostgreSQL vs SQLite\n```'), 'PostgreSQL vs SQLite');
+    assert.equal(normalizeGeneratedTitle('Question'), 'Question');
+    assert.deepEqual(requestRoutes, ['/infer']);
+});
+
+test('title generation requires the model selected for the chat response', async () => {
+    const generateTitle = createTitleGenerationService({ request: async () => {
+        throw new Error('Title generation must not request model discovery.');
+    } });
+    await assert.rejects(
+        generateTitle({
+            message: 'Summarize this conversation.',
+            provider: '',
+            model: '',
+        }),
+        /did not include its provider and model/,
     );
-    assert.match(title, /PostgreSQL to SQLite/);
-    assert.ok(title.length <= 57);
-    assert.ok(title.endsWith('…'));
 });
 
 test('temporary conversation IDs are never persisted without a client temporary flag', async () => {
@@ -130,6 +170,108 @@ test('temporary conversation IDs are never persisted without a client temporary 
     }
 });
 
+test('title generation does not block the main response or overwrite a user rename', async () => {
+    const appendedMessages = [];
+    const metadata = {};
+    let resolveGeneratedTitle;
+    let markTitleStarted;
+    let markTitleSaved;
+    let mainResponseReturned = false;
+    const titleStarted = new Promise(resolve => { markTitleStarted = resolve; });
+    const titleSaved = new Promise(resolve => { markTitleSaved = resolve; });
+    const streamManager = new StreamManager();
+    const server = createWebUiServer({
+        db: {
+            appendMessage: async message => appendedMessages.push(message),
+            getMessages: async () => [{ role: 'user', content: 'Explain Docker.' }],
+            getModelPreference: async () => null,
+            pool: {
+                query: async (query, values = []) => {
+                    if (query.includes('WITH first_user_message')) {
+                        Object.assign(metadata, {
+                            title: 'New conversation',
+                            title_source: 'default',
+                            title_status: 'pending',
+                        });
+                        return { rows: [{ prompt: 'Explain Docker.' }] };
+                    }
+                    if (query.includes('SELECT metadata')) {
+                        return { rowCount: 1, rows: [{ metadata }] };
+                    }
+                    if (query.includes("metadata = metadata || $3::jsonb")) {
+                        Object.assign(metadata, JSON.parse(values[2]));
+                        return { rowCount: 1, rows: [] };
+                    }
+                    if (query.includes("metadata->>'title_status' = 'pending'")) {
+                        if (metadata.title_status === 'pending' && metadata.title_source === 'default') {
+                            Object.assign(metadata, {
+                                title: values[2],
+                                title_source: values[3],
+                                title_status: values[4],
+                            });
+                        }
+                        markTitleSaved();
+                        return { rowCount: 1, rows: [] };
+                    }
+                    return { rows: [] };
+                },
+            },
+        },
+        bridgeSse: async () => {
+            mainResponseReturned = true;
+            return {
+                content: 'Docker is a containerization platform.',
+                model: 'main-model',
+                provider: 'ollama',
+            };
+        },
+        titleGenerator: async options => {
+            assert.equal(mainResponseReturned, true);
+            assert.equal(options.provider, 'ollama');
+            assert.equal(options.model, 'main-model');
+            markTitleStarted();
+            return new Promise(resolve => { resolveGeneratedTitle = resolve; });
+        },
+        streamManager,
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'title-async-chat',
+                message: 'Explain Docker.',
+            }),
+        });
+        assert.equal(response.status, 202);
+        const { streamId } = await response.json();
+        await streamManager.streams.get(streamId).task;
+        await titleStarted;
+        assert.deepEqual(appendedMessages.map(message => message.role), ['user', 'assistant']);
+        assert.equal(metadata.title_status, 'pending');
+
+        const renameResponse = await fetch(
+            `http://127.0.0.1:${server.address().port}/api/conversations/title-async-chat`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'rename', title: 'My Docker notes' }),
+            },
+        );
+        assert.equal(renameResponse.status, 200);
+        assert.equal(metadata.title_source, 'user');
+        resolveGeneratedTitle('Docker containers explained');
+        await titleSaved;
+        assert.equal(metadata.title, 'My Docker notes');
+        assert.equal(metadata.title_status, 'generated');
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
 test('conversation API hides temporary conversations left by older versions', async () => {
     let conversationQuery = '';
     const server = createWebUiServer({
@@ -140,7 +282,11 @@ test('conversation API hides temporary conversations left by older versions', as
                     return {
                         rows: [
                             { conversation_id: 'temp-legacy', metadata: {}, preview: 'Temporary chat' },
-                            { conversation_id: 'saved-chat', metadata: {}, preview: 'Saved chat' },
+                            {
+                                conversation_id: 'saved-chat',
+                                metadata: { title_status: 'pending' },
+                                preview: 'New conversation',
+                            },
                         ],
                     };
                 },
@@ -155,6 +301,7 @@ test('conversation API hides temporary conversations left by older versions', as
         assert.equal(response.status, 200);
         const { conversations } = await response.json();
         assert.deepEqual(conversations.map(conversation => conversation.conversation_id), ['saved-chat']);
+        assert.equal(conversations[0].is_title_generating, true);
         assert.match(conversationQuery, /conversation_id NOT LIKE 'temp-%'/);
     } finally {
         await new Promise((resolve, reject) => server.close(error => (

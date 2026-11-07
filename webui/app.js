@@ -10,8 +10,10 @@ require('dotenv').config({ path: path.join(ROOT, '.env') });
 const database = require('../core/database');
 const { requestJson, requestSse } = require('./bridge');
 const { StreamManager } = require('./streamManager');
+const { createTitleGenerationService } = require('./js/title');
 
 const PLATFORM = 'webui';
+const DEFAULT_CONVERSATION_TITLE = 'New conversation';
 const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64 MB
 const AVAILABLE_TOOLS = Object.freeze([
     {
@@ -71,22 +73,6 @@ function validateStreamId(value) {
     return value;
 }
 
-function conversationTitleFromPrompt(prompt) {
-    const normalized = prompt
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^[\s"'`]+|[\s"'`]+$/g, '');
-    if (normalized.length <= 56) {
-        return normalized.charAt(0).toLocaleUpperCase() + normalized.slice(1);
-    }
-
-    const opening = normalized
-        .split(/(?<=[.!?。！？])\s+/u, 1)[0]
-        .replace(/^(?:(?:please\s+)?(?:help me|can you|could you|i want to)\s+|(?:hãy\s+)?(?:giúp tôi|giúp mình|mình muốn|tôi muốn)\s+)/i, '');
-    const concise = opening.split(' ').slice(0, 8).join(' ');
-    return `${concise.slice(0, 56).replace(/[\s,;:.-]+$/g, '')}…`;
-}
-
 async function readJson(request) {
     if (!String(request.headers['content-type'] || '').toLowerCase().startsWith('application/json')) {
         throw new HttpError(415, 'Content-Type must be application/json.');
@@ -131,6 +117,7 @@ function createWebUiServer({
     bridgeRequest = requestJson,
     bridgeSse = requestSse,
     streamManager = new StreamManager(),
+    titleGenerator = createTitleGenerationService({ request: bridgeRequest }),
 } = {}) {
     const bootId = randomUUID();
     const callBridge = async (route, options) => {
@@ -139,6 +126,55 @@ function createWebUiServer({
         } catch (error) {
             throw new HttpError(502, error.message || 'Inference bridge is unavailable.');
         }
+    };
+    const saveConversationTitle = async ({
+        conversationId,
+        title,
+        titleSource,
+        titleStatus,
+    }) => {
+        try {
+            await db.pool.query(`
+                UPDATE chat_sessions
+                SET metadata = COALESCE(metadata, '{}'::jsonb)
+                        || jsonb_build_object(
+                            'title', $3::text,
+                            'title_source', $4::text,
+                            'title_status', $5::text
+                        ),
+                    updated_at = NOW()
+                WHERE platform = $1
+                  AND conversation_id = $2
+                  AND metadata->>'title_status' = 'pending'
+                  AND COALESCE(metadata->>'title_source', 'default') = 'default'
+            `, [PLATFORM, conversationId, title, titleSource, titleStatus]);
+        } catch (error) {
+            console.error('[WEBUI] Could not save the conversation title:', error);
+        }
+    };
+    const scheduleConversationTitle = ({ conversationId, prompt, provider, model }) => {
+        const titleTask = Promise.resolve().then(async () => {
+            let title;
+            let titleSource = 'ai';
+            let titleStatus = 'generated';
+            try {
+                title = await titleGenerator({ message: prompt, provider, model });
+            } catch (error) {
+                console.error('[WEBUI] Conversation title generation failed:', error);
+                title = DEFAULT_CONVERSATION_TITLE;
+                titleSource = 'default';
+                titleStatus = 'failed';
+            }
+            await saveConversationTitle({
+                conversationId,
+                title,
+                titleSource,
+                titleStatus,
+            });
+        });
+        titleTask.catch(error => {
+            console.error('[WEBUI] Conversation title task failed:', error);
+        });
     };
 
     return http.createServer(async (request, response) => {
@@ -525,6 +561,7 @@ function createWebUiServer({
                         .filter(row => !row.conversation_id.startsWith('temp-'))
                         .map(row => ({
                             ...row,
+                            is_title_generating: row.metadata?.title_status === 'pending',
                             is_generating: Boolean(
                                 streamManager.activeForConversation(row.conversation_id)
                             ),
@@ -553,7 +590,11 @@ function createWebUiServer({
                         UPDATE chat_sessions
                         SET metadata = metadata || $3::jsonb, updated_at = NOW()
                         WHERE platform = $1 AND conversation_id = $2
-                    `, [PLATFORM, conversationId, JSON.stringify({ title: body.title.trim() })]);
+                    `, [PLATFORM, conversationId, JSON.stringify({
+                        title: body.title.trim(),
+                        title_source: 'user',
+                        title_status: 'generated',
+                    })]);
                 } else if (action === 'pin' || action === 'archive') {
                     const key = action === 'pin' ? 'pinned' : 'archived';
                     await db.pool.query(`
@@ -616,6 +657,7 @@ function createWebUiServer({
                     || Boolean(body.isTemporary || body.temporary);
                 const userId = `webui-${conversationId}`;
                 let history;
+                let titlePrompt = null;
                 if (isTemporary) {
                     if (Array.isArray(body.messages) && body.messages.length > 0) {
                         history = body.messages.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
@@ -633,57 +675,88 @@ function createWebUiServer({
                         timestamp: new Date().toISOString(),
                     });
 
+                    const titleClaim = await db.pool.query(`
+                        WITH first_user_message AS (
+                            SELECT payload->>'content' AS prompt
+                            FROM chat_messages
+                            WHERE platform = $1
+                              AND conversation_id = $2
+                              AND role = 'user'
+                            ORDER BY created_at ASC, id ASC
+                            LIMIT 1
+                        )
+                        UPDATE chat_sessions AS session
+                        SET metadata = COALESCE(session.metadata, '{}'::jsonb)
+                                || jsonb_build_object(
+                                    'title', 'New conversation',
+                                    'title_source', 'default',
+                                    'title_status', 'pending'
+                                ),
+                            updated_at = NOW()
+                        FROM first_user_message
+                        WHERE session.platform = $1
+                          AND session.conversation_id = $2
+                          AND COALESCE(session.metadata->>'title', '') = ''
+                          AND COALESCE(session.metadata->>'title_source', 'default') = 'default'
+                        RETURNING first_user_message.prompt
+                    `, [PLATFORM, conversationId]);
+                    titlePrompt = titleClaim.rows?.[0]?.prompt || null;
+
                     history = await db.getMessages({
                         platform: PLATFORM,
                         conversationId,
                         limit: 100,
                     });
-                    const isFirstMessage = history.filter(item => item.role === 'user').length === 1;
-                    if (isFirstMessage) {
-                        const title = conversationTitleFromPrompt(message);
-                        await db.pool.query(`
-                            UPDATE chat_sessions
-                            SET metadata = (
-                                    COALESCE(metadata, '{}'::jsonb)
-                                    - 'title_pending_boot'
-                                    - 'title_generation_requested'
-                                ) || CASE WHEN COALESCE(metadata->>'title', '') = ''
-                                    THEN jsonb_build_object('title', $3::text)
-                                    ELSE '{}'::jsonb END,
-                                updated_at = NOW()
-                            WHERE platform = $1
-                              AND conversation_id = $2
-                        `, [PLATFORM, conversationId, title]);
-                    }
                 }
                 const preference = await db.getModelPreference(modelScope(conversationId));
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
-                    const result = await bridgeSse('/infer', {
-                        method: 'POST',
-                        timeoutMs: 600_000,
-                        body: {
-                            stream: true,
-                            provider: preference?.provider,
-                            model: preference?.model,
-                            platform: PLATFORM,
-                            think: body.think,
-                            tools: selectedTools,
-                            session: {
+                    let result;
+                    try {
+                        result = await bridgeSse('/infer', {
+                            method: 'POST',
+                            timeoutMs: 600_000,
+                            body: {
+                                stream: true,
+                                provider: preference?.provider,
+                                model: preference?.model,
                                 platform: PLATFORM,
-                                conversation_id: conversationId,
-                                user_id: userId,
+                                think: body.think,
+                                tools: selectedTools,
+                                session: {
+                                    platform: PLATFORM,
+                                    conversation_id: conversationId,
+                                    user_id: userId,
+                                },
+                                messages: history.map(({ role, content }) => ({ role, content })),
                             },
-                            messages: history.map(({ role, content }) => ({ role, content })),
-                        },
-                        onEvent(type, data) {
-                            if (type === 'thinking' && data.text) {
-                                publish('thinking', { text: data.text });
-                            } else if (type === 'delta' && data.text) {
-                                publish('delta', { text: data.text });
-                            }
-                        },
-                    });
+                            onEvent(type, data) {
+                                if (type === 'thinking' && data.text) {
+                                    publish('thinking', { text: data.text });
+                                } else if (type === 'delta' && data.text) {
+                                    publish('delta', { text: data.text });
+                                }
+                            },
+                        });
+                    } catch (error) {
+                        if (titlePrompt) {
+                            saveConversationTitle({
+                                conversationId,
+                                title: DEFAULT_CONVERSATION_TITLE,
+                                titleSource: 'default',
+                                titleStatus: 'failed',
+                            });
+                        }
+                        throw error;
+                    }
+                    if (titlePrompt) {
+                        scheduleConversationTitle({
+                            conversationId,
+                            prompt: titlePrompt,
+                            provider: result.provider,
+                            model: result.model,
+                        });
+                    }
                     const assistantMessage = {
                         platform: PLATFORM,
                         conversation_id: conversationId,
@@ -826,7 +899,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-    conversationTitleFromPrompt,
     createWebUiServer,
     validateConversationId,
 };

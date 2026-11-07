@@ -147,11 +147,21 @@ export function initializeSidebar({ api, sessionId }) {
                 spinner.setAttribute('aria-label', 'Agent is working');
                 item.append(spinner);
             }
-            const title = document.createElement('span');
-            title.className = 'conversation-title';
-            title.textContent = conversation.preview;
-            item.append(title);
-            item.title = conversation.preview;
+            if (conversation.is_title_generating) {
+                const titleLoading = document.createElement('span');
+                titleLoading.className = 'conversation-title-generating';
+                titleLoading.setAttribute('role', 'status');
+                titleLoading.setAttribute('aria-label', 'Generating conversation title');
+                titleLoading.textContent = 'Generating title';
+                item.append(titleLoading);
+                item.title = 'Generating conversation title';
+            } else {
+                const title = document.createElement('span');
+                title.className = 'conversation-title';
+                title.textContent = conversation.preview;
+                item.append(title);
+                item.title = conversation.preview;
+            }
             item.addEventListener('click', () => selectSession(conversation.conversation_id));
             row.dataset.conversationId = conversation.conversation_id;
 
@@ -282,7 +292,9 @@ export function initializeSidebar({ api, sessionId }) {
         if (refreshTimer) window.clearTimeout(refreshTimer);
         refreshTimer = window.setTimeout(
             () => loadConversations().catch(showConversationError),
-            conversations.some(conversation => conversation.is_generating) ? 1200 : 5000,
+            conversations.some(conversation => (
+                conversation.is_generating || conversation.is_title_generating
+            )) ? 1200 : 5000,
         );
     }
 

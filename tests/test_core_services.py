@@ -769,6 +769,104 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["headers"], {"Authorization": "Bearer test-token"})
 
 
+    async def test_router_falls_back_to_native_ollama_chat_after_openai_endpoint_404(self) -> None:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeResponse:
+            def __init__(self, status_code: int, data: dict[str, object]) -> None:
+                self.status_code = status_code
+                self.data = data
+
+            def raise_for_status(self) -> None:
+                if self.status_code >= 400:
+                    raise AssertionError(f"Unexpected response status: {self.status_code}")
+
+            def json(self) -> dict[str, object]:
+                return self.data
+
+        class FakeClient:
+            async def post(self, url: str, **kwargs: object) -> FakeResponse:
+                calls.append((url, kwargs))
+                if len(calls) == 1:
+                    return FakeResponse(404, {})
+                return FakeResponse(200, {
+                    "model": "llama-test",
+                    "message": {"role": "assistant", "content": "Docker overview"},
+                    "done_reason": "stop",
+                    "prompt_eval_count": 12,
+                    "eval_count": 4,
+                })
+
+        result = await Router._call_backend(
+            provider=SimpleNamespace(
+                name="ollama",
+                endpoint=SimpleNamespace(base_url="http://localhost:11434"),
+            ),  # type: ignore[arg-type]
+            model_id="llama-test",
+            messages=[{"role": "user", "content": "Explain Docker."}],
+            temperature=0.1,
+            max_tokens=48,
+            stream=False,
+            extra={},
+            client=FakeClient(),  # type: ignore[arg-type]
+        )
+
+        self.assertEqual(
+            [url for url, _ in calls],
+            [
+                "http://localhost:11434/v1/chat/completions",
+                "http://localhost:11434/api/chat",
+            ],
+        )
+        self.assertEqual(calls[1][1]["json"], {
+            "model": "llama-test",
+            "messages": [{"role": "user", "content": "Explain Docker."}],
+            "stream": False,
+            "options": {"temperature": 0.1, "num_predict": 48},
+            "think": False,
+        })
+        self.assertEqual(result["choices"][0]["message"]["content"], "Docker overview")
+        self.assertEqual(result["usage"], {"prompt_tokens": 12, "completion_tokens": 4})
+
+    async def test_router_reports_native_ollama_404_error_detail(self) -> None:
+        class FakeResponse:
+            def __init__(self, status_code: int, data: dict[str, object]) -> None:
+                self.status_code = status_code
+                self.data = data
+
+            def json(self) -> dict[str, object]:
+                return self.data
+
+            def raise_for_status(self) -> None:
+                raise AssertionError("The detailed Ollama error should be raised first.")
+
+        class FakeClient:
+            async def post(self, url: str, **kwargs: object) -> FakeResponse:
+                if url.endswith("/v1/chat/completions"):
+                    return FakeResponse(404, {})
+                return FakeResponse(404, {
+                    "error": "model 'gemma4:31b-cloud' not found",
+                })
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "model 'gemma4:31b-cloud' not found",
+        ):
+            await Router._call_backend(
+                provider=SimpleNamespace(
+                    name="ollama",
+                    endpoint=SimpleNamespace(base_url="http://localhost:11434"),
+                ),  # type: ignore[arg-type]
+                model_id="gemma4:31b-cloud",
+                messages=[{"role": "user", "content": "Hello."}],
+                temperature=0.1,
+                max_tokens=8,
+                stream=False,
+                extra={},
+                client=FakeClient(),  # type: ignore[arg-type]
+            )
+
+
 class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_record_usage_casts_jsonb_build_object_parameters(self) -> None:
         database = FakeDatabase()
