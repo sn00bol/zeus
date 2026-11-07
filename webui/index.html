@@ -4,21 +4,66 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#100d0b">
+    <meta name="theme-color" content="#000000">
     <meta name="zeus-boot-id" content="">
     <title>ZEUS</title>
     <link rel="icon" href="/zeus.ico" sizes="any">
+    <script>
+        (() => {
+            let theme = 'system';
+            const colors = {};
+            try {
+                theme = localStorage.getItem('zeus.webui.theme') || 'system';
+                if (theme === 'zeus') {
+                    theme = 'system';
+                    localStorage.setItem('zeus.webui.theme', theme);
+                }
+                colors.accent = localStorage.getItem('zeus.webui.custom_color') || '';
+                colors.sidebar = localStorage.getItem('zeus.webui.custom_sidebar_color') || '';
+                colors.background = localStorage.getItem('zeus.webui.custom_background_color') || '';
+                colors.foreground = localStorage.getItem('zeus.webui.custom_foreground_color') || '';
+            } catch (error) {
+                console.warn('[WEBUI] Could not read appearance preference during startup:', error);
+            }
+            if (!['light', 'dark', 'system'].includes(theme)) theme = 'system';
+            const mode = theme === 'system'
+                ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                : theme;
+            const defaults = mode === 'dark'
+                ? { accent: '#1d4ed8', sidebar: '#191919', background: '#000000', foreground: '#ededed' }
+                : { accent: '#1d4ed8', sidebar: '#ffffff', background: '#f5f5f5', foreground: '#222222' };
+            const validHex = value => /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value);
+            document.documentElement.dataset.themeMode = mode;
+            for (const name of Object.keys(defaults)) {
+                const color = validHex(colors[name] || '') ? colors[name] : defaults[name];
+                document.documentElement.style.setProperty(`--user-${name}`, color);
+            }
+            document.querySelector('meta[name="theme-color"]').content = validHex(colors.background || '')
+                ? colors.background
+                : defaults.background;
+        })();
+    </script>
     <style>
         html {
             color-scheme: dark;
-            background: #100d0b;
+            background: #000000;
         }
 
         body {
             min-height: 100vh;
             margin: 0;
-            background: #100d0b;
+            background: #000000;
             color: #edf0f7;
+        }
+        html[data-theme-mode="light"], html[data-theme-mode="light"] body {
+            color-scheme: light;
+            background: #f5f5f5;
+            color: #222222;
+        }
+        html[data-theme-mode="dark"], html[data-theme-mode="dark"] body {
+            color-scheme: dark;
+            background: #000000;
+            color: #ededed;
         }
     </style>
     <script src="/js/theme.js"></script>
@@ -30,6 +75,15 @@
 </head>
 
 <body>
+    <script>
+        document.body.dataset.themeMode = document.documentElement.dataset.themeMode;
+        for (const name of ['accent', 'sidebar', 'background', 'foreground']) {
+            document.body.style.setProperty(
+                `--user-${name}`,
+                document.documentElement.style.getPropertyValue(`--user-${name}`),
+            );
+        }
+    </script>
     <div class="app" id="app">
         <aside class="sidebar" id="conversation-menu">
             <div class="menubar">
