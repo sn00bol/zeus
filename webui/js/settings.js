@@ -116,11 +116,6 @@ const SETTINGS_STYLE = `
 .settings-doc-dialog-content img { max-width: 100%; }
 .settings-info-license { margin: 18px 0 4px; color: #928a83; text-align: center; font-size: 11px; line-height: 1.6; }
 .settings-info-license a { color: var(--user-accent, #1d4ed8); text-decoration: underline; text-underline-offset: 3px; }
-.settings-page[data-page="information"].settings-info-enter .settings-version-banner { animation: settings-info-banner-in .65s cubic-bezier(.2, .8, .2, 1) both; }
-.settings-page[data-page="information"].settings-info-enter .settings-info-card { animation: settings-info-card-in .45s cubic-bezier(.2, .8, .2, 1) both; }
-.settings-page[data-page="information"].settings-info-enter .settings-info-card:nth-child(2) { animation-delay: .08s; }
-@keyframes settings-info-banner-in { from { opacity: 0; transform: translateY(14px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
-@keyframes settings-info-card-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .settings-model-panel { padding: 0; }
 .settings-model-panel-heading-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .settings-model-panel-heading-row .settings-section-title { margin: 0; }
@@ -313,6 +308,7 @@ export function initializeSettings({
     loadModels,
     onSearchSettingChange,
 }) {
+    const initialVersion = document.querySelector('meta[name="zeus-version"]')?.content || '';
     const style = document.createElement('style');
     style.textContent = SETTINGS_STYLE;
     document.head.append(style);
@@ -520,7 +516,7 @@ export function initializeSettings({
                             aria-label="System information" hidden>
                             <div class="settings-version-banner" aria-label="ZEUS version information">
                                 <div class="settings-version-copy">
-                                    <span class="settings-version-value" aria-live="polite">Loading...</span>
+                                    <span class="settings-version-value" aria-live="polite"></span>
                                 </div>
                             </div>
                             <p class="settings-version-error" role="status" hidden>Could not load the ZEUS version.</p>
@@ -658,6 +654,11 @@ export function initializeSettings({
     const versionValue = dialog.querySelector('.settings-version-value');
     const versionError = dialog.querySelector('.settings-version-error');
     const infoCards = dialog.querySelectorAll('[data-info-card]');
+    if (initialVersion) {
+        versionValue.textContent = initialVersion;
+        const zeusCard = dialog.querySelector('[data-info-card="zeus"]');
+        zeusCard.querySelector('.settings-info-card-value').textContent = initialVersion;
+    }
     const infoRuntimeItems = dialog.querySelectorAll('[data-info-runtime]');
     const infoRuntimeDependencies = dialog.querySelectorAll('[data-runtime-dependencies]');
     const projectDocs = dialog.querySelectorAll('[data-project-doc]');
@@ -792,9 +793,12 @@ export function initializeSettings({
             }
         } catch (error) {
             console.error('Could not load system information:', error);
-            versionValue.textContent = 'Unavailable';
-            versionError.hidden = false;
+            if (!initialVersion) {
+                versionValue.textContent = 'Unavailable';
+                versionError.hidden = false;
+            }
             for (const card of infoCards) {
+                if (initialVersion && card.dataset.infoCard === 'zeus') continue;
                 card.querySelector('.settings-info-card-value').textContent = 'Unavailable';
                 card.querySelector('.settings-info-card-detail').textContent = 'Could not load system information.';
             }

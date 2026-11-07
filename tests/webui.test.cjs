@@ -300,6 +300,11 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.equal(page.status, 200);
         assert.match(page.body.toString('utf8'), /<link rel="icon" href="\/zeus\.ico"/);
         assert.match(page.body.toString('utf8'), /<meta name="zeus-boot-id" content="[a-f0-9-]{36}">/);
+        const version = require('node:fs').readFileSync('version', 'utf8').trim();
+        assert.ok(page.body.toString('utf8').includes(
+            `<meta name="zeus-version" content="${version}">`,
+        ));
+        assert.match(page.body.toString('utf8'), /rel="preload" href="\/font\/Streetsign-Sans\.otf" as="font"/);
         assert.match(page.body.toString('utf8'), /localStorage\.getItem\('zeus\.webui\.theme'\)/);
         assert.match(page.body.toString('utf8'), /document\.documentElement\.dataset\.themeMode = mode/);
         assert.match(page.body.toString('utf8'), /document\.body\.dataset\.themeMode = document\.documentElement\.dataset\.themeMode/);
@@ -326,6 +331,9 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.temp-chat-button/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.menubar-brand img \{ filter: grayscale\(1\) brightness\(\.55\); \}/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle img,[\s\S]*?filter: brightness\(0\);/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 10%, #ffffff\);/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: color-mix\(in srgb, var\(--user-accent\) 16%, #242424\);/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.app\.menu-closed \.collapsed-icon-img/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.message\.user \.message-body/);
@@ -409,6 +417,9 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(chat.body.toString('utf8'), /settings\?\.openSection\('models'\)/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search,[\s\S]*?background: #ffffff/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-search-wrap\.search-open \.settings-search::placeholder/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.search-result-item \{ color: #404040; \}/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.search-result-item:hover,[\s\S]*?background: #e5e5e5;/);
+        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.search-result-icon \{ color: #525252; background: #0000000a; \}/);
         assert.match(settings.body.toString('utf8'), /settings-search-results chat-scroll/);
         assert.match(settings.body.toString('utf8'), /data-theme-option="light"/);
         assert.match(settings.body.toString('utf8'), /data-theme-option="dark"/);
@@ -449,6 +460,10 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(settings.body.toString('utf8'), /data-info-runtime="node"/);
         assert.match(settings.body.toString('utf8'), /data-info-runtime="python"/);
         assert.match(settings.body.toString('utf8'), /void loadSystemInfo\(\);\s*function applyTheme\(\)/);
+        assert.match(settings.body.toString('utf8'), /meta\[name="zeus-version"\]/);
+        assert.match(settings.body.toString('utf8'), /versionValue\.textContent = initialVersion/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /settings-info-banner-in/);
+        assert.doesNotMatch(settings.body.toString('utf8'), /settings-info-card-in|settings-info-enter[\s\S]{0,120}settings-info-card/);
         assert.match(settings.body.toString('utf8'), /\.settings-info-dependencies \{ display: grid; grid-template-columns: minmax\(0, 1fr\); gap: 2px;/);
         assert.match(settings.body.toString('utf8'), /\.settings-info-dependency \{[^}]*color: #928a83;/);
         assert.match(settings.body.toString('utf8'), /\.settings-info-runtime-section \+ \.settings-info-runtime-section::before \{[^}]*right: 16px; left: 16px;[^}]*height: 1px;/);

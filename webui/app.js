@@ -205,9 +205,20 @@ function createWebUiServer({
                 return;
             }
             if (request.method === 'GET' && url.pathname === '/') {
+                const version = fs.readFileSync(path.join(ROOT, 'version'), 'utf8').trim();
+                if (!version) throw new Error('The version file is empty.');
+                const escapedVersion = version.replace(/[&"<>]/g, character => ({
+                    '&': '&amp;',
+                    '"': '&quot;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                })[character]);
                 const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8')
                     .replace('<meta name="zeus-boot-id" content="">', (
                         `<meta name="zeus-boot-id" content="${bootId}">`
+                    ))
+                    .replace('<meta name="zeus-version" content="">', (
+                        `<meta name="zeus-version" content="${escapedVersion}">`
                     ));
                 sendContent(response, Buffer.from(html, 'utf8'), 'text/html; charset=utf-8');
                 return;
