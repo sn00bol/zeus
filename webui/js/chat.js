@@ -60,6 +60,12 @@ let promptScrollDragOffset = 0;
 let isTempChat = false;
 let tempMessagesList = [];
 let userPinnedToBottom = true;
+const tempThemeColors = {
+    accent: '#ffffff',
+    sidebar: '#000000',
+    background: '#000000',
+    foreground: '#ededed',
+};
 
 const WELCOME_MESSAGES = [
     'Howdy, wanna talk something?',
@@ -89,6 +95,17 @@ function scrollToLatest(force = false) {
 function setTempChatMode(active) {
     isTempChat = Boolean(active);
     document.body.classList.toggle('temp-chat-mode', isTempChat);
+    document.body.dataset.themeMode = isTempChat
+        ? 'dark'
+        : document.documentElement.dataset.themeMode;
+    for (const name of Object.keys(tempThemeColors)) {
+        document.body.style.setProperty(
+            `--user-${name}`,
+            isTempChat
+                ? tempThemeColors[name]
+                : document.documentElement.style.getPropertyValue(`--user-${name}`),
+        );
+    }
     if (tempChatButton) {
         tempChatButton.classList.toggle('active', isTempChat);
         tempChatButton.setAttribute('aria-pressed', String(isTempChat));
@@ -183,7 +200,7 @@ function setEmptyChatLayout(empty) {
         chatElement.classList.add('welcome-state');
         return;
     }
-    tempChatButton.hidden = true;
+    tempChatButton.hidden = !isTempChat;
     chatDock.append(composerWrap, chatFooter);
     chatDock.hidden = false;
     chatElement.classList.remove('welcome-state');
@@ -639,7 +656,7 @@ function resizePrompt() {
     updatePromptScrollBar();
 }
 
-async function watchAssistantStream(streamId, response) {
+async function watchAssistantStream(streamId, response, temporaryMessages = null) {
     let renderedText = '';
     const loading = createLoadingIndicator();
     response.thinking.hidden = false;
@@ -691,8 +708,8 @@ async function watchAssistantStream(streamId, response) {
             result.message?.content || renderedText,
             result.message?.sources,
         );
-        if (isTempChat) {
-            tempMessagesList.push({
+        if (temporaryMessages) {
+            temporaryMessages.push({
                 role: 'assistant',
                 content: result.message?.content || renderedText,
             });
@@ -750,6 +767,7 @@ form.addEventListener('submit', async event => {
     const sessionId = conversationId;
     const messageContainer = messagesElement;
     const tools = [...selectedTools];
+    const temporaryMessages = isTempChat ? tempMessagesList : null;
 
     busySessions.add(sessionId);
     messageContainer.dataset.historyLoaded = 'true';
@@ -757,11 +775,11 @@ form.addEventListener('submit', async event => {
     setEmptyChatLayout(false);
     userPinnedToBottom = true;
     addMessage('user', messageText);
-    if (isTempChat) {
-        tempMessagesList.push({ role: 'user', content: messageText });
+    if (temporaryMessages) {
+        temporaryMessages.push({ role: 'user', content: messageText });
     }
     chatActions.hidden = false;
-    if (chatMoreButton) chatMoreButton.hidden = isTempChat;
+    if (chatMoreButton) chatMoreButton.hidden = Boolean(temporaryMessages);
     input.value = '';
     selectedTools = [];
     renderSelectedTools();
@@ -777,16 +795,16 @@ form.addEventListener('submit', async event => {
             message: messageText,
             think: getThinkParam(),
             tools,
-            isTemporary: isTempChat,
-            messages: isTempChat ? tempMessagesList : [],
+            isTemporary: Boolean(temporaryMessages),
+            messages: temporaryMessages || [],
         });
         activeStreams.set(sessionId, streamId);
-        if (!isTempChat) {
+        if (!temporaryMessages) {
             sidebar.loadConversations().catch(error => {
                 console.error('[WEBUI] Could not refresh conversation list:', error);
             });
         }
-        await watchAssistantStream(streamId, response);
+        await watchAssistantStream(streamId, response, temporaryMessages);
     } catch (error) {
         response.item.classList.add('error');
         response.contentElement.className = 'message-content';
@@ -798,7 +816,7 @@ form.addEventListener('submit', async event => {
             updateSendButton();
             input.focus();
         }
-        if (!isTempChat) {
+        if (!temporaryMessages) {
             sidebar.loadConversations().catch(error => {
                 console.error('[WEBUI] Could not refresh conversation list:', error);
             });

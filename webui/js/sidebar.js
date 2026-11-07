@@ -108,18 +108,21 @@ export function initializeSidebar({ api, sessionId }) {
 
     async function loadConversations() {
         const { conversations } = await api('/api/conversations?archived=all');
-        allConversations = conversations; // cache for search
+        const visibleConversations = conversations.filter(
+            conversation => !conversation.conversation_id.startsWith('temp-'),
+        );
+        allConversations = visibleConversations; // cache for search
         document.querySelectorAll('.conversation-menu:not(.chat-menu)').forEach(el => el.remove());
         list.replaceChildren();
         pinnedList.replaceChildren();
-        const pinnedConversations = conversations.filter(
+        const pinnedConversations = visibleConversations.filter(
             conversation => conversation.metadata?.pinned,
         );
-        const otherConversations = conversations.filter(
+        const otherConversations = visibleConversations.filter(
             conversation => !conversation.metadata?.pinned,
         );
         pinnedSection.hidden = pinnedConversations.length === 0;
-        if (conversations.length === 0) {
+        if (visibleConversations.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'conversation-empty';
             empty.textContent = 'No conversations yet';
@@ -127,7 +130,7 @@ export function initializeSidebar({ api, sessionId }) {
             return;
         }
 
-        for (const conversation of conversations) {
+        for (const conversation of visibleConversations) {
             const targetList = conversation.metadata?.pinned ? pinnedList : list;
             const row = document.createElement('div');
             row.className = 'conversation-row';

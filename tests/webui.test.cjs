@@ -65,6 +65,104 @@ test('conversation titles are immediate and concise for long prompts', () => {
     assert.ok(title.endsWith('…'));
 });
 
+test('temporary conversation IDs are never persisted without a client temporary flag', async () => {
+    const appendedMessages = [];
+    const streamManager = new StreamManager();
+    const server = createWebUiServer({
+        db: {
+            appendMessage: async message => appendedMessages.push(message),
+            getMessages: async () => [{ role: 'user', content: 'persistent prompt' }],
+            getModelPreference: async () => null,
+            pool: { query: async () => ({}) },
+        },
+        bridgeSse: async (route, options) => {
+            assert.equal(route, '/infer');
+            assert.deepEqual(options.body.messages, [{
+                role: 'user',
+                content: options.body.session.conversation_id === 'temp-123'
+                    ? 'temporary prompt'
+                    : 'persistent prompt',
+            }]);
+            return {
+                content: 'temporary response',
+                model: 'local-model',
+                provider: 'ollama',
+                prompt_tokens: 1,
+                completion_tokens: 1,
+            };
+        },
+        streamManager,
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'temp-123',
+                message: 'temporary prompt',
+            }),
+        });
+        assert.equal(response.status, 202);
+        const { streamId } = await response.json();
+        await streamManager.streams.get(streamId).task;
+        assert.deepEqual(appendedMessages, []);
+
+        const persistentResponse = await fetch(
+            `http://127.0.0.1:${server.address().port}/api/chat`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conversationId: 'conversation-123',
+                    message: 'persistent prompt',
+                }),
+            },
+        );
+        assert.equal(persistentResponse.status, 202);
+        const persistentStream = await persistentResponse.json();
+        await streamManager.streams.get(persistentStream.streamId).task;
+        assert.deepEqual(appendedMessages.map(message => message.role), ['user', 'assistant']);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('conversation API hides temporary conversations left by older versions', async () => {
+    let conversationQuery = '';
+    const server = createWebUiServer({
+        db: {
+            pool: {
+                query: async query => {
+                    conversationQuery = query;
+                    return {
+                        rows: [
+                            { conversation_id: 'temp-legacy', metadata: {}, preview: 'Temporary chat' },
+                            { conversation_id: 'saved-chat', metadata: {}, preview: 'Saved chat' },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(
+            `http://127.0.0.1:${server.address().port}/api/conversations?archived=all`,
+        );
+        assert.equal(response.status, 200);
+        const { conversations } = await response.json();
+        assert.deepEqual(conversations.map(conversation => conversation.conversation_id), ['saved-chat']);
+        assert.match(conversationQuery, /conversation_id NOT LIKE 'temp-%'/);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
 test('about endpoint reports ZEUS and runtime versions with SearXNG availability', async () => {
     const previousSearxngUrl = process.env.SEARXNG_URL;
     const previousSearxngVersion = process.env.SEARXNG_VERSION;
@@ -226,6 +324,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.doesNotMatch(theme.body.toString('utf8'), /#fb923c|#fdba74|#ffedd5|#100d0b|#15110e|#191410|#211912/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.conversation-action/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.temp-chat-button/);
+        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.menubar-brand img \{ filter: grayscale\(1\) brightness\(\.55\); \}/);
+        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.app\.menu-closed \.collapsed-icon-img/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.message\.user \.message-body/);

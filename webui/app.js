@@ -129,6 +129,7 @@ function sendContent(response, body, contentType) {
 function createWebUiServer({
     db = database,
     bridgeRequest = requestJson,
+    bridgeSse = requestSse,
     streamManager = new StreamManager(),
 } = {}) {
     const bootId = randomUUID();
@@ -502,18 +503,21 @@ function createWebUiServer({
                            ) AS preview
                     FROM chat_sessions AS chat_session
                     WHERE chat_session.platform = $1
+                      AND chat_session.conversation_id NOT LIKE 'temp-%'
                       AND ($2::boolean IS NULL OR COALESCE((chat_session.metadata->>'archived')::boolean, FALSE) = $2)
                     ORDER BY COALESCE((chat_session.metadata->>'pinned')::boolean, FALSE) DESC,
                              COALESCE(chat_session.last_message_at, chat_session.updated_at) DESC
                     LIMIT 20
                 `, [PLATFORM, archivedFilter]);
                 sendJson(response, 200, {
-                    conversations: rows.map(row => ({
-                        ...row,
-                        is_generating: Boolean(
-                            streamManager.activeForConversation(row.conversation_id)
-                        ),
-                    })),
+                    conversations: rows
+                        .filter(row => !row.conversation_id.startsWith('temp-'))
+                        .map(row => ({
+                            ...row,
+                            is_generating: Boolean(
+                                streamManager.activeForConversation(row.conversation_id)
+                            ),
+                        })),
                 });
                 return;
             }
@@ -597,7 +601,8 @@ function createWebUiServer({
                     throw new HttpError(400, 'tools must contain only available tool names.');
                 }
 
-                const isTemporary = Boolean(body.isTemporary || body.temporary);
+                const isTemporary = conversationId.startsWith('temp-')
+                    || Boolean(body.isTemporary || body.temporary);
                 const userId = `webui-${conversationId}`;
                 let history;
                 if (isTemporary) {
@@ -643,7 +648,7 @@ function createWebUiServer({
                 const preference = await db.getModelPreference(modelScope(conversationId));
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
-                    const result = await requestSse('/infer', {
+                    const result = await bridgeSse('/infer', {
                         method: 'POST',
                         timeoutMs: 600_000,
                         body: {

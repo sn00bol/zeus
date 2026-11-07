@@ -387,7 +387,9 @@ const themeStyles = String.raw`
         }
         body.temp-chat-mode .sidebar { background: #000000; border-right-color: #222222; }
         body.temp-chat-mode .menubar { background: #000000; }
-        body.temp-chat-mode .menubar-brand img { filter: grayscale(1) brightness(1.2); }
+        body.temp-chat-mode .menubar-brand img { filter: grayscale(1) brightness(.55); }
+        body.temp-chat-mode .temp-chat-button img,
+        body.temp-chat-mode .chat-more-button img { filter: brightness(0) invert(1); opacity: .82; }
         body.temp-chat-mode .composer { background: #121212; border-color: rgba(255, 255, 255, .18); }
         body.temp-chat-mode .send { background: #ffffff; color: #000000; }
         body.temp-chat-mode .send:hover:not(:disabled) { background: #e4e4e7; }

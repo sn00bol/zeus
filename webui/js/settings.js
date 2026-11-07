@@ -1,6 +1,13 @@
 import { sanitizeHtml } from './renderHTML.js';
 import { initializeScrollbar } from './scrollbar.js';
 
+const TEMPORARY_THEME_COLORS = {
+    accent: '#ffffff',
+    sidebar: '#000000',
+    background: '#000000',
+    foreground: '#ededed',
+};
+
 const SETTINGS_STYLE = `
 @font-face {
     font-family: "Streetsign Sans";
@@ -820,11 +827,15 @@ export function initializeSettings({
                 foreground: '#222222',
             };
         document.documentElement.dataset.themeMode = resolvedTheme;
-        document.body.dataset.themeMode = resolvedTheme;
+        const temporaryChat = document.body.classList.contains('temp-chat-mode');
+        document.body.dataset.themeMode = temporaryChat ? 'dark' : resolvedTheme;
         for (const [name, defaultColor] of Object.entries(defaultColors)) {
             const color = customColors[name] || defaultColor;
             document.documentElement.style.setProperty(`--user-${name}`, color);
-            document.body.style.setProperty(`--user-${name}`, color);
+            document.body.style.setProperty(
+                `--user-${name}`,
+                temporaryChat ? TEMPORARY_THEME_COLORS[name] : color,
+            );
             const input = dialog.querySelector(`[data-color-input="${name}"]`);
             const picker = dialog.querySelector(`[data-color-picker="${name}"]`);
             if (document.activeElement !== input) input.value = color;
