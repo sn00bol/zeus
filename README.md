@@ -9,7 +9,7 @@
   </p>
   <p>
     <a href="https://github.com/sn00bol/zeus/releases"><img src="https://img.shields.io/github/v/release/sn00bol/zeus?include_prereleases" alt="GitHub Release" /></a>
-    <a href="https://github.com/sn00bol/zeus/actions"><img src="https://img.shields.io/github/actions/workflow/status/sn00bol/zeus/ci.yml" alt="Release Build Status" /></a>
+    <a href="https://github.com/sn00bol/zeus/actions"><img src="https://img.shields.io/github/actions/workflow/status/sn00bol/zeus/docker-publish.yml" alt="Release Build Status" /></a>
     <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPL%20v3.0-blue.svg" alt="License" /></a>
   </p>
 </div>
