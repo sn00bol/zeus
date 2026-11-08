@@ -19,7 +19,8 @@ const scrollElement = document.getElementById('chat-scroll');
 const chatElement = document.querySelector('.chat');
 const chatActions = document.getElementById('chat-actions');
 const tempChatButton = document.getElementById('temp-chat-button');
-const chatMoreButton = document.getElementById('chat-more-button');
+const chatTitleButton = document.getElementById('chat-title-button');
+const stopButton = document.getElementById('stop-button');
 const scrollBar = document.getElementById('chat-scrollbar');
 const scrollThumb = document.getElementById('chat-scrollbar-thumb');
 const welcomeElement = document.getElementById('welcome');
@@ -70,6 +71,7 @@ const modelMenu = document.getElementById('model-picker-menu');
 const thinkingModeButton = document.getElementById('thinking-mode-button');
 const thinkingModeLabel = document.getElementById('thinking-mode-label');
 const busySessions = new Set();
+const generatingSessions = new Set();
 const activeStreams = new Map();
 const sessionViews = new Map([[conversationId, messagesElement]]);
 const sessionDrafts = new Map();
@@ -98,6 +100,7 @@ let promptScrollDragOffset = 0;
 let isTempChat = false;
 let tempMessagesList = [];
 let userPinnedToBottom = true;
+let lastChatScrollTop = scrollElement.scrollTop;
 const tempThemeColors = {
     accent: '#ffffff',
     sidebar: '#000000',
@@ -151,8 +154,8 @@ function setTempChatMode(active) {
             ? 'Temporary chat is active. Click to exit.'
             : 'Temporary chat';
     }
-    if (chatMoreButton) {
-        chatMoreButton.hidden = messagesElement.childElementCount === 0;
+    if (chatTitleButton) {
+        chatTitleButton.hidden = isTempChat || messagesElement.childElementCount === 0;
     }
 }
 
@@ -173,7 +176,7 @@ if (tempChatButton) {
                 messagesElement.replaceWith(tempContainer);
                 messagesElement = tempContainer;
             }
-            if (chatMoreButton) chatMoreButton.hidden = true;
+            if (chatTitleButton) chatTitleButton.hidden = true;
             welcomeElement.hidden = false;
             document.getElementById('welcome-text').textContent = 'Temporary chat';
             document.getElementById('welcome-subtitle').hidden = false;
@@ -266,7 +269,11 @@ initializeScrollbar({
         scrollBar.style.height = `${trackHeight}px`;
     },
     onScroll() {
-        if (isNearBottom(60)) userPinnedToBottom = true;
+        const scrollTop = scrollElement.scrollTop;
+        if (scrollTop > lastChatScrollTop + 1 && isNearBottom(60)) {
+            userPinnedToBottom = true;
+        }
+        lastChatScrollTop = scrollTop;
     },
     onPointerDown() {
         userPinnedToBottom = false;
@@ -723,12 +730,30 @@ searchOption.hidden = !settings.isSearchEnabled();
 
 function updateSendButton() {
     const hasInput = Boolean(input.value.trim() || selectedAttachments.length);
+    const isBusy = busySessions.has(conversationId);
+    const isGenerating = activeStreams.has(conversationId)
+        && generatingSessions.has(conversationId);
     form.classList.toggle('has-input', hasInput);
     form.classList.toggle('has-attachments', selectedAttachments.length > 0);
-    sendButton.disabled = busySessions.has(conversationId)
+    form.classList.toggle('is-busy', isBusy);
+    sendButton.disabled = isBusy
         || messagesElement.dataset.historyLoaded !== 'true'
         || !hasInput;
+    stopButton.hidden = !isGenerating;
+    stopButton.disabled = !isGenerating;
 }
+
+stopButton.addEventListener('click', async () => {
+    const streamId = activeStreams.get(conversationId);
+    if (!streamId) return;
+    stopButton.disabled = true;
+    try {
+        await api(`/api/streams/${encodeURIComponent(streamId)}/stop`, { method: 'POST' });
+    } catch (error) {
+        stopButton.disabled = false;
+        window.alert(`Could not stop the response: ${error.message}`);
+    }
+});
 
 const textFileExtensions = new Set([
     'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml',
@@ -1387,6 +1412,12 @@ async function loadTools() {
 }
 
 function resizePrompt() {
+    const hasFixedColumnLayout = form.classList.contains('has-tools')
+        || form.classList.contains('has-attachments');
+    if (!hasFixedColumnLayout) {
+        form.classList.remove('multiline');
+        updateAddButtonPlacement();
+    }
     input.style.height = 'auto';
     const height = input.value ? input.scrollHeight : 32;
     const multiline = height > 48;
@@ -1396,7 +1427,12 @@ function resizePrompt() {
     updatePromptScrollBar();
 }
 
-async function watchAssistantStream(streamId, response, temporaryMessages = null) {
+async function watchAssistantStream(
+    streamId,
+    response,
+    temporaryMessages = null,
+    sessionId = conversationId,
+) {
     let renderedText = '';
     const loading = createLoadingIndicator();
     response.thinking.hidden = false;
@@ -1423,12 +1459,32 @@ async function watchAssistantStream(streamId, response, temporaryMessages = null
         const result = await watchChatStream({
             onEvent(type, data) {
                 if (type === 'ui_control') {
-                    if (data.state === 'thinking') loading.setLabel('Thinking…');
-                    if (data.state === 'complete' || data.state === 'error') loading.finish();
+                    if (data.state === 'thinking') {
+                        loading.setLabel('Thinking…');
+                        if (sessionId) {
+                            generatingSessions.add(sessionId);
+                            if (sessionId === conversationId) updateSendButton();
+                        }
+                    }
+                    if (data.state === 'complete' || data.state === 'error') {
+                        loading.finish();
+                        if (sessionId) {
+                            generatingSessions.delete(sessionId);
+                            if (sessionId === conversationId) updateSendButton();
+                        }
+                    }
                 } else if (type === 'thinking') {
+                    if (sessionId) {
+                        generatingSessions.add(sessionId);
+                        if (sessionId === conversationId) updateSendButton();
+                    }
                     loading.appendThinking(data.text || '');
                     if (messagesElement.contains(response.item)) scrollToLatest(false);
                 } else if (type === 'delta') {
+                    if (sessionId) {
+                        generatingSessions.add(sessionId);
+                        if (sessionId === conversationId) updateSendButton();
+                    }
                     loading.setGenerating();
                     renderedText += data.text;
                     scheduleRender();
@@ -1438,6 +1494,14 @@ async function watchAssistantStream(streamId, response, temporaryMessages = null
                     if (data.message?.thinking) loading.setThinking(data.message.thinking);
                     loading.finish();
                     flushRender(data.message.content, data.message.sources);
+                } else if (type === 'stopped') {
+                    if (sessionId) {
+                        generatingSessions.delete(sessionId);
+                        if (sessionId === conversationId) updateSendButton();
+                    }
+                    loading.finish();
+                    response.item.classList.add('stopped');
+                    flushRender(renderedText);
                 }
             },
             streamId,
@@ -1536,7 +1600,7 @@ form.addEventListener('submit', async event => {
         temporaryMessages.push({ role: 'user', content: requestText, tools, attachments });
     }
     chatActions.hidden = false;
-    if (chatMoreButton) chatMoreButton.hidden = Boolean(temporaryMessages);
+    if (chatTitleButton) chatTitleButton.hidden = Boolean(temporaryMessages);
     input.value = '';
     closeAttachmentPreview({ restoreFocus: false });
     selectedAttachments = [];
@@ -1547,7 +1611,7 @@ form.addEventListener('submit', async event => {
     resizePrompt();
     const response = addMessage('assistant', '', {}, messageContainer);
     // Show the more button after assistant message is added
-    if (chatMoreButton) chatMoreButton.hidden = false;
+    if (chatTitleButton) chatTitleButton.hidden = Boolean(temporaryMessages);
 
     try {
         const streamId = await startChatStream({
@@ -1560,18 +1624,20 @@ form.addEventListener('submit', async event => {
             messages: temporaryMessages || [],
         });
         activeStreams.set(sessionId, streamId);
+        if (sessionId === conversationId) updateSendButton();
         if (!temporaryMessages) {
             sidebar.loadConversations().catch(error => {
                 console.error('[WEBUI] Could not refresh conversation list:', error);
             });
         }
-        await watchAssistantStream(streamId, response, temporaryMessages);
+        await watchAssistantStream(streamId, response, temporaryMessages, sessionId);
     } catch (error) {
         response.item.classList.add('error');
         response.contentElement.className = 'message-content';
         response.contentElement.textContent = error.message;
     } finally {
         busySessions.delete(sessionId);
+        generatingSessions.delete(sessionId);
         activeStreams.delete(sessionId);
         if (sessionId === conversationId) {
             updateSendButton();
@@ -1600,15 +1666,18 @@ async function resumeActiveStream(sessionId = conversationId) {
         updateSendButton();
         setEmptyChatLayout(false);
         chatActions.hidden = false;
-        if (chatMoreButton) chatMoreButton.hidden = isTempChat;
+        if (chatTitleButton) chatTitleButton.hidden = isTempChat;
     }
     try {
         await watchAssistantStream(
             result.streamId,
             addMessage('assistant', '', {}, messageContainer),
+            null,
+            sessionId,
         );
     } finally {
         activeStreams.delete(sessionId);
+        generatingSessions.delete(sessionId);
         busySessions.delete(sessionId);
         if (sessionId === conversationId) updateSendButton();
         sidebar.loadConversations().catch(error => {
@@ -1670,7 +1739,7 @@ async function switchSession(sessionId) {
     const cachedIsEmpty = messagesElement.childElementCount === 0;
     welcomeElement.hidden = !cachedIsEmpty;
     chatActions.hidden = false;
-    if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(nextMessages);
+    if (chatTitleButton) chatTitleButton.hidden = isTempChat || !hasAssistantMessage(nextMessages);
     setEmptyChatLayout(cachedIsEmpty);
 
     // Reset welcome text to random message when switching to empty session
@@ -1706,7 +1775,7 @@ async function switchSession(sessionId) {
     isEmpty = messagesElement.childElementCount === 0;
     welcomeElement.hidden = !isEmpty;
     chatActions.hidden = false;
-    if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
+    if (chatTitleButton) chatTitleButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
     setEmptyChatLayout(isEmpty);
     historyLoadingElement.hidden = true;
     updateSendButton();
@@ -1759,7 +1828,7 @@ Promise.all([
         updateSendButton();
         setEmptyChatLayout(isEmpty);
         chatActions.hidden = false;
-        if (chatMoreButton) chatMoreButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
+        if (chatTitleButton) chatTitleButton.hidden = isTempChat || !hasAssistantMessage(messagesElement);
         if (isEmpty && !isTempChat) {
             document.getElementById('welcome-text').textContent = WELCOME_MESSAGES[Math.floor(Math.random() * WELCOME_MESSAGES.length)];
         }

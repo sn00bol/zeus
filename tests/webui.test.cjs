@@ -22,6 +22,62 @@ test('image preview exposes zoom presets and custom pan scrollbars without float
     assert.doesNotMatch(markup, /attachment-image-floating-prompt|attachment-image-prompt-form|data-image-action=/);
     assert.match(markup, /id="prompt-add-button"/);
     assert.match(markup, /id="message-input"/);
+    assert.match(markup, /id="stop-button"[\s\S]*?src="\/icon\/stop\.png"/);
+    const chatSource = fs.readFileSync('webui/js/chat.js', 'utf8');
+    assert.match(chatSource, /const isGenerating = activeStreams\.has\(conversationId\)\s*&& generatingSessions\.has\(conversationId\)/);
+    assert.match(chatSource, /if \(data\.state === 'thinking'\)[\s\S]*?generatingSessions\.add\(sessionId\)/);
+    assert.match(chatSource, /stopButton\.hidden = !isGenerating/);
+    const themeSource = fs.readFileSync('webui/js/theme.js', 'utf8');
+    assert.match(themeSource, /\.send-icon, \.stop-icon \{ filter: brightness\(0\) invert\(1\); \}/);
+    assert.match(themeSource, /\.composer\.has-input #send-button \{ display: grid; \}/);
+    assert.match(themeSource, /#stop-button\[hidden\] \{ display: none; \}/);
+});
+
+test('prompt resize measures wrapping in a stable single-row layout', () => {
+    const source = fs.readFileSync('webui/js/chat.js', 'utf8');
+    const resizePrompt = source.match(/function resizePrompt\(\) \{([\s\S]*?)\n\}/)?.[1];
+    assert.ok(resizePrompt);
+    assert.match(resizePrompt, /form\.classList\.remove\('multiline'\);\s*updateAddButtonPlacement\(\);/);
+    assert.ok(
+        resizePrompt.indexOf("form.classList.remove('multiline')")
+            < resizePrompt.indexOf('const height = input.value ? input.scrollHeight : 32'),
+    );
+    assert.match(resizePrompt, /form\.classList\.toggle\('multiline', multiline\)/);
+    const themeSource = fs.readFileSync('webui/js/theme.js', 'utf8');
+    assert.match(themeSource, /\.composer\.multiline \{ gap: 2px; padding-bottom: 3px; \}/);
+    assert.match(themeSource, /\.composer\.multiline textarea \{ padding-bottom: 1px; \}/);
+});
+
+test('conversation export keeps rendered Markdown and escapes document metadata', async () => {
+    const source = fs.readFileSync('webui/js/conversationExport.js', 'utf8');
+    const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+    const { buildConversationExportPage } = await import(moduleUrl);
+    const page = buildConversationExportPage({
+        title: '<Project> "notes"',
+        exportedAt: '2025-01-02 & later',
+        katexStylesheetUrl: 'https://example.test/katex.css?x=1&y=2',
+        messages: [
+            { role: 'user', html: '<p>Question with <strong>Markdown</strong></p>' },
+            { role: 'system', html: '<p>Do not export system messages</p>' },
+            {
+                role: 'assistant',
+                html: '<h2>Answer</h2><ul><li>List item</li></ul>'
+                    + '<pre><code>const answer = 42;</code></pre>'
+                    + '<table><tbody><tr><td>Cell</td></tr></tbody></table>',
+            },
+        ],
+    });
+
+    assert.match(page, /&lt;Project&gt; &quot;notes&quot;/);
+    assert.match(page, /2025-01-02 &amp; later/);
+    assert.match(page, /katex\.css\?x=1&amp;y=2/);
+    assert.match(page, /<strong>Markdown<\/strong>/);
+    assert.match(page, /<h2>Answer<\/h2>/);
+    assert.match(page, /<pre><code>const answer = 42;<\/code><\/pre>/);
+    assert.match(page, /<table><tbody><tr><td>Cell<\/td><\/tr><\/tbody><\/table>/);
+    assert.doesNotMatch(page, /Do not export system messages/);
+    assert.match(page, /@page\s*\{\s*size: A4;/);
+    assert.match(page, /name="ProgId" content="Word\.Document"/);
 });
 
 test('server-side streams outlive SSE subscribers and replay bounded buffered events', async () => {
@@ -95,28 +151,222 @@ test('title generation uses the same automatically selected or user-selected cha
     assert.equal(requestOptions.body.model, 'selected-by-user');
     assert.equal(requestOptions.body.stream, false);
     assert.equal(requestOptions.body.temperature, 0.1);
-    assert.equal(requestOptions.body.max_tokens, 48);
+    assert.equal(requestOptions.body.max_tokens, 64);
     assert.equal(requestOptions.body.think, false);
     assert.equal(requestOptions.body.strict_model, true);
     assert.deepEqual(requestOptions.body.messages.map(message => message.role), ['system', 'user']);
     assert.match(requestOptions.body.messages[0].content, /only a greeting or has no substantive intent/i);
     assert.equal(normalizeGeneratedTitle('```text\nPostgreSQL vs SQLite\n```'), 'PostgreSQL vs SQLite');
     assert.equal(normalizeGeneratedTitle('Question'), 'Question');
+    assert.equal(
+        normalizeGeneratedTitle(
+            'How to optimize a PostgreSQL query without losing existing indexes. '
+            + 'Keep the current query plan stable.',
+        ),
+        'How to optimize a PostgreSQL query without losing existing indexes. '
+            + 'Keep the current query plan stable.',
+    );
     assert.deepEqual(requestRoutes, ['/infer']);
 });
 
-test('title generation requires the model selected for the chat response', async () => {
-    const generateTitle = createTitleGenerationService({ request: async () => {
-        throw new Error('Title generation must not request model discovery.');
+test('title generation can use the automatic model when the response was stopped early', async () => {
+    let requestOptions;
+    const generateTitle = createTitleGenerationService({ request: async (route, options) => {
+        assert.equal(route, '/infer');
+        requestOptions = options;
+        return { content: 'Conversation title' };
     } });
+    assert.equal(await generateTitle({ message: 'Summarize this conversation.' }), 'Conversation title');
+    assert.equal(requestOptions.body.provider, undefined);
+    assert.equal(requestOptions.body.model, undefined);
+    assert.equal(requestOptions.body.strict_model, false);
+
     await assert.rejects(
         generateTitle({
             message: 'Summarize this conversation.',
-            provider: '',
-            model: '',
+            provider: 'ollama',
         }),
-        /did not include its provider and model/,
+        /must include both provider and model/,
     );
+
+    await generateTitle({
+        message: [
+            { type: 'text', text: 'Create a title for this image.' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } },
+        ],
+    });
+    assert.deepEqual(requestOptions.body.messages[1].content, [
+        { type: 'text', text: 'Create a title for this image.' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } },
+    ]);
+});
+
+test('title generation continues after the chat stream is stopped', async () => {
+    const metadata = {};
+    let resolveGeneratedTitle;
+    let markTitleStarted;
+    let markInferenceStarted;
+    let markTitleSaved;
+    const titleStarted = new Promise(resolve => { markTitleStarted = resolve; });
+    const inferenceStarted = new Promise(resolve => { markInferenceStarted = resolve; });
+    const titleSaved = new Promise(resolve => { markTitleSaved = resolve; });
+    const streamManager = new StreamManager();
+    const server = createWebUiServer({
+        db: {
+            appendMessage: async () => {},
+            getMessages: async () => [{ role: 'user', content: 'Explain Docker.' }],
+            getModelPreference: async () => ({ provider: 'ollama', model: 'main-model' }),
+            pool: {
+                query: async (query, values = []) => {
+                    if (query.includes('WITH first_user_message')) {
+                        Object.assign(metadata, {
+                            title: 'New conversation',
+                            title_source: 'default',
+                            title_status: 'pending',
+                        });
+                        return { rows: [{ prompt: 'Explain Docker.' }] };
+                    }
+                    if (query.includes("metadata->>'title_status' = 'pending'")) {
+                        Object.assign(metadata, {
+                            title: values[2],
+                            title_source: values[3],
+                            title_status: values[4],
+                        });
+                        markTitleSaved();
+                    }
+                    return { rows: [] };
+                },
+            },
+        },
+        bridgeSse: async (route, { signal }) => {
+            markInferenceStarted();
+            return new Promise((resolve, reject) => {
+                signal.addEventListener('abort', () => {
+                    reject(new Error('The chat was stopped.'));
+                }, { once: true });
+            });
+        },
+        titleGenerator: async options => {
+            assert.equal(options.provider, 'ollama');
+            assert.equal(options.model, 'main-model');
+            markTitleStarted();
+            return new Promise(resolve => { resolveGeneratedTitle = resolve; });
+        },
+        streamManager,
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'stopped-title-chat',
+                message: 'Explain Docker.',
+            }),
+        });
+        assert.equal(response.status, 202);
+        const { streamId } = await response.json();
+        await Promise.all([titleStarted, inferenceStarted]);
+        assert.equal(streamManager.cancel(streamId), true);
+        await streamManager.streams.get(streamId).task;
+
+        resolveGeneratedTitle('Docker containers explained');
+        await titleSaved;
+        assert.equal(metadata.title, 'Docker containers explained');
+        assert.equal(metadata.title_source, 'ai');
+        assert.equal(metadata.title_status, 'generated');
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('attachment-only conversations generate a title from text and image attachments', async () => {
+    const metadata = {};
+    let markTitleSaved;
+    const titleSaved = new Promise(resolve => { markTitleSaved = resolve; });
+    const streamManager = new StreamManager();
+    const server = createWebUiServer({
+        db: {
+            appendMessage: async () => {},
+            getMessages: async () => [{
+                role: 'user',
+                content: 'Please analyze the attached file(s).',
+            }],
+            getModelPreference: async () => null,
+            pool: {
+                query: async (query, values = []) => {
+                    if (query.includes('WITH first_user_message')) {
+                        Object.assign(metadata, {
+                            title: 'New conversation',
+                            title_source: 'default',
+                            title_status: 'pending',
+                        });
+                        return { rows: [{ prompt: 'Please analyze the attached file(s).' }] };
+                    }
+                    if (query.includes("metadata->>'title_status' = 'pending'")) {
+                        Object.assign(metadata, {
+                            title: values[2],
+                            title_source: values[3],
+                            title_status: values[4],
+                        });
+                        markTitleSaved();
+                    }
+                    return { rows: [] };
+                },
+            },
+        },
+        bridgeSse: async () => ({
+            content: 'Attachment analyzed.',
+            model: 'main-model',
+            provider: 'ollama',
+        }),
+        titleGenerator: async ({ message }) => {
+            assert.equal(message[0].type, 'text');
+            assert.match(message[0].text, /receipt\.png/);
+            assert.match(message[0].text, /Some attached notes\./);
+            assert.deepEqual(message[1], {
+                type: 'image_url',
+                image_url: { url: 'data:image/png;base64,aW1n' },
+            });
+            return 'Receipt and notes';
+        },
+        streamManager,
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'attachment-only-chat',
+                message: '',
+                attachments: [{
+                    kind: 'text',
+                    name: 'notes.txt',
+                    type: 'text/plain',
+                    text: 'Some attached notes.',
+                }, {
+                    kind: 'image',
+                    name: 'receipt.png',
+                    type: 'image/png',
+                    data: 'data:image/png;base64,aW1n',
+                }],
+            }),
+        });
+        assert.equal(response.status, 202);
+        const { streamId } = await response.json();
+        await streamManager.streams.get(streamId).task;
+        await titleSaved;
+        assert.equal(metadata.title, 'Receipt and notes');
+        assert.equal(metadata.title_source, 'ai');
+        assert.equal(metadata.title_status, 'generated');
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
 });
 
 test('temporary conversation IDs are never persisted without a client temporary flag', async () => {
@@ -287,7 +537,7 @@ test('title generation does not block the main response or overwrite a user rena
         db: {
             appendMessage: async message => appendedMessages.push(message),
             getMessages: async () => [{ role: 'user', content: 'Explain Docker.' }],
-            getModelPreference: async () => null,
+            getModelPreference: async () => ({ provider: 'ollama', model: 'main-model' }),
             pool: {
                 query: async (query, values = []) => {
                     if (query.includes('WITH first_user_message')) {
@@ -329,7 +579,7 @@ test('title generation does not block the main response or overwrite a user rena
             };
         },
         titleGenerator: async options => {
-            assert.equal(mainResponseReturned, true);
+            assert.equal(mainResponseReturned, false);
             assert.equal(options.provider, 'ollama');
             assert.equal(options.model, 'main-model');
             markTitleStarted();
@@ -486,6 +736,38 @@ test('project document routes serve the repository Markdown files', async () => 
     }
 });
 
+test('conversation export module is served as a WebUI JavaScript asset', async () => {
+    const server = createWebUiServer({ db: {} });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(
+            `http://127.0.0.1:${server.address().port}/js/conversationExport.js`,
+        );
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get('content-type'), /text\/javascript/);
+        assert.match(await response.text(), /buildConversationExportPage/);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('stop icon is served as a WebUI image asset', async () => {
+    const server = createWebUiServer({ db: {} });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/icon/stop.png`);
+        assert.equal(response.status, 200);
+        assert.match(response.headers.get('content-type'), /image\/png/);
+        assert.ok((await response.arrayBuffer()).byteLength > 0);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
 test('WebUI uses its bridge and supports reconnecting to a server-side stream', async () => {
     const requests = [];
     const streamManager = new StreamManager();
@@ -554,7 +836,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.ok(page.body.toString('utf8').includes(
             `<meta name="zeus-version" content="${version}">`,
         ));
-        assert.match(page.body.toString('utf8'), /rel="preload" href="\/font\/Streetsign-Sans\.otf" as="font"/);
+        assert.doesNotMatch(page.body.toString('utf8'), /rel="preload" href="\/font\/Streetsign-Sans\.otf" as="font"/);
         assert.match(page.body.toString('utf8'), /localStorage\.getItem\('zeus\.webui\.theme'\)/);
         assert.match(page.body.toString('utf8'), /document\.documentElement\.dataset\.themeMode = mode/);
         assert.match(page.body.toString('utf8'), /document\.body\.dataset\.themeMode = document\.documentElement\.dataset\.themeMode/);
@@ -564,6 +846,10 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(page.body.toString('utf8'), /src="\/vendor\/markdown-it\/markdown-it\.min\.js"/);
         assert.match(page.body.toString('utf8'), /src="\/vendor\/task-lists\/markdown-it-task-lists\.min\.js"/);
         assert.doesNotMatch(page.body.toString('utf8'), /cdn\.jsdelivr\.net/);
+        assert.match(page.body.toString('utf8'), /class="chat-title-button" id="chat-title-button"/);
+        assert.match(page.body.toString('utf8'), /id="stop-button"/);
+        assert.match(page.body.toString('utf8'), /id="rename-dialog"/);
+        assert.doesNotMatch(page.body.toString('utf8'), /id="chat-more-button"/);
         const currentBootId = page.body.toString('utf8').match(
             /<meta name="zeus-boot-id" content="([^"]+)">/,
         )[1];
@@ -580,10 +866,10 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.conversation-action/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.temp-chat-button/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.menubar-brand img \{ filter: grayscale\(1\) brightness\(\.55\); \}/);
-        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
+        assert.match(theme.body.toString('utf8'), /\.chat-title-button:hover,[\s\S]*?background: color-mix\(in srgb, var\(--user-foreground\) 8%, transparent\)/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle img,[\s\S]*?filter: brightness\(0\);/);
-        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover,[\s\S]*?background-color: #0000000a;/);
-        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover,[\s\S]*?background-color: #ffffff0c;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?background-color: #0000000a;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?background-color: #ffffff0c;/);
         assert.match(theme.body.toString('utf8'), /\.menu-toggle \{[^}]*appearance: none;[^}]*background: transparent;/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover \.sidebar-icon,[\s\S]*?filter: brightness\(0\);/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
@@ -595,9 +881,9 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-info-project-item \{ color: #404040; \}/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-doc-dialog-content \{ color: #404040; \}/);
         assert.match(theme.body.toString('utf8'), /\.temp-chat-button \{ width: 36px; height: 36px;[^}]*background: transparent;/);
-        assert.match(theme.body.toString('utf8'), /\.chat-more-button \{ width: 36px; height: 36px;[^}]*background: transparent;/);
+        assert.match(theme.body.toString('utf8'), /\.chat-title-button \{ max-width: 100%; height: 36px;[^}]*background: transparent;/);
         assert.match(theme.body.toString('utf8'), /\.temp-chat-button img \{ width: 20px; height: 20px; \}/);
-        assert.match(theme.body.toString('utf8'), /\.chat-more-button img \{ width: 22px; height: 22px; \}/);
+        assert.match(theme.body.toString('utf8'), /\.chat-title-button svg \{ flex: none; opacity: \.7; \}/);
         assert.doesNotMatch(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="(?:light|dark)"\] \.temp-chat-button,[\s\S]{0,100}?background:\s*#[0-9a-f]{3,8}/i);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.new-chat:hover \.newchat-icon/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.source-pill:hover/);
@@ -612,7 +898,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.doesNotMatch(theme.body.toString('utf8'), /#a78bfa|#c4b5fd/);
         assert.match(theme.body.toString('utf8'), /\.message\.user \.message-body \{[^}]*border-radius: 999px;/);
         assert.match(theme.body.toString('utf8'), /\.message\.user \.message-body \{[^}]*padding: 11px 15px 0;/);
-        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.send-icon \{ filter: brightness\(0\) invert\(1\); \}/);
+        assert.match(theme.body.toString('utf8'), /\.send-icon, \.stop-icon \{ filter: brightness\(0\) invert\(1\); \}/);
         assert.doesNotMatch(theme.body.toString('utf8'), /\.composer:focus-within/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content pre code \{ color: #262626; \}/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.attachment-code-rendered pre code \{ color: #262626; \}/);
@@ -633,6 +919,7 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
             '/js/scrollbar.js',
             '/icon/model.png',
             '/icon/search.png',
+            '/icon/stop.png',
             '/icon/appearance.png',
             '/icon/terminal.png',
             '/icon/more.png',
@@ -711,8 +998,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /background:\s*var\(--user-sidebar\)/);
         assert.match(theme.body.toString('utf8'), /color:\s*var\(--user-foreground\)/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.sidebar-search-btn:hover \{ color: #ffffff; background: #ffffff0c; \}/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.chat-more-button\[aria-expanded="true"\] \{ color: #ffffff; border-color: transparent; background: #ffffff0c; \}/);
-        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.conversation-rename-input \{ color: #262626; \}/);
+        assert.match(theme.body.toString('utf8'), /\.chat-title-button:hover, \.chat-title-button:focus-visible, \.chat-title-button\[aria-expanded="true"\]/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.rename-title-input \{ border-color: #d4d4d4; color: #262626; background: #f5f5f5; \}/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode\[data-theme-mode="light"\] \{ color-scheme: dark; background: #000000; color: #ededed; \}/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.app\.menu-closed \.sidebar,[\s\S]*?background: #000000; border-right-color: #222222;/);
         assert.match(settings.body.toString('utf8'), /body\[data-theme-mode="light"\] \.settings-switch/);

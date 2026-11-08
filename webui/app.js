@@ -358,7 +358,7 @@ function createWebUiServer({
                 sendStatic(response, path.join(__dirname, 'zeus.ico'), 'image/x-icon');
                 return;
             }
-            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|settings|sidebar|session|theme|scrollbar)\.js$/);
+            const assetMatch = url.pathname.match(/^\/js\/(chat|render|renderMath|renderHTML|loading|stream|streamaddon|model|settings|sidebar|session|theme|scrollbar|conversationExport)\.js$/);
             if (request.method === 'GET' && assetMatch) {
                 sendStatic(
                     response,
@@ -433,6 +433,12 @@ function createWebUiServer({
                 sendJson(response, 200, {
                     streamId: streamManager.activeForConversation(conversationId),
                 });
+                return;
+            }
+            const stopStreamMatch = url.pathname.match(/^\/api\/streams\/([^/]+)\/stop$/);
+            if (request.method === 'POST' && stopStreamMatch) {
+                const streamId = validateStreamId(stopStreamMatch[1]);
+                sendJson(response, 200, { stopped: streamManager.cancel(streamId) });
                 return;
             }
             if (request.method === 'GET' && url.pathname.startsWith('/api/streams/')) {
@@ -776,7 +782,26 @@ function createWebUiServer({
                           AND COALESCE(session.metadata->>'title_source', 'default') = 'default'
                         RETURNING first_user_message.prompt
                     `, [PLATFORM, conversationId]);
-                    titlePrompt = titleClaim.rows?.[0]?.prompt || null;
+                    const claimedPrompt = titleClaim.rows?.[0]?.prompt;
+                    if (claimedPrompt !== undefined) {
+                        if (message || attachments.length) {
+                            const titleMessage = message ? claimedPrompt || message : (
+                                `Create a concise title based on these attachment(s): ${
+                                    attachments.map(attachment => attachment.name).join(', ')
+                                }`
+                            );
+                            titlePrompt = attachments.length
+                                ? providerMessageContent(titleMessage, attachments)
+                                : titleMessage;
+                        } else {
+                            await saveConversationTitle({
+                                conversationId,
+                                title: DEFAULT_CONVERSATION_TITLE,
+                                titleSource: 'default',
+                                titleStatus: 'generated',
+                            });
+                        }
+                    }
 
                     history = await db.getMessages({
                         platform: PLATFORM,
@@ -799,54 +824,43 @@ function createWebUiServer({
                         : content,
                 }));
                 const preference = await db.getModelPreference(modelScope(conversationId));
-                const streamId = streamManager.start(async publish => {
+                if (titlePrompt) {
+                    scheduleConversationTitle({
+                        conversationId,
+                        prompt: titlePrompt,
+                        provider: preference?.provider,
+                        model: preference?.model,
+                    });
+                }
+                const streamId = streamManager.start(async (publish, signal) => {
                     publish('ui_control', { state: 'thinking' });
-                    let result;
-                    try {
-                        result = await bridgeSse('/infer', {
-                            method: 'POST',
-                            timeoutMs: 600_000,
-                            body: {
-                                stream: true,
-                                provider: preference?.provider,
-                                model: preference?.model,
+                    const result = await bridgeSse('/infer', {
+                        method: 'POST',
+                        timeoutMs: 600_000,
+                        signal,
+                        body: {
+                            stream: true,
+                            provider: preference?.provider,
+                            model: preference?.model,
+                            platform: PLATFORM,
+                            think: body.think,
+                            tools: selectedTools,
+                            session: {
                                 platform: PLATFORM,
-                                think: body.think,
-                                tools: selectedTools,
-                                session: {
-                                    platform: PLATFORM,
-                                    conversation_id: conversationId,
-                                    user_id: userId,
-                                },
-                                messages: providerMessages,
+                                conversation_id: conversationId,
+                                user_id: userId,
                             },
-                            onEvent(type, data) {
-                                if (type === 'thinking' && data.text) {
-                                    publish('thinking', { text: data.text });
-                                } else if (type === 'delta' && data.text) {
-                                    publish('delta', { text: data.text });
-                                }
-                            },
-                        });
-                    } catch (error) {
-                        if (titlePrompt) {
-                            saveConversationTitle({
-                                conversationId,
-                                title: DEFAULT_CONVERSATION_TITLE,
-                                titleSource: 'default',
-                                titleStatus: 'failed',
-                            });
-                        }
-                        throw error;
-                    }
-                    if (titlePrompt) {
-                        scheduleConversationTitle({
-                            conversationId,
-                            prompt: titlePrompt,
-                            provider: result.provider,
-                            model: result.model,
-                        });
-                    }
+                            messages: providerMessages,
+                        },
+                        onEvent(type, data) {
+                            if (type === 'thinking' && data.text) {
+                                publish('thinking', { text: data.text });
+                            } else if (type === 'delta' && data.text) {
+                                publish('delta', { text: data.text });
+                            }
+                        },
+                    });
+                    if (signal.aborted) return;
                     const assistantMessage = {
                         platform: PLATFORM,
                         conversation_id: conversationId,
@@ -865,6 +879,7 @@ function createWebUiServer({
                         },
                         timestamp: new Date().toISOString(),
                     };
+                    if (signal.aborted) return;
                     if (!isTemporary) {
                         await db.appendMessage(assistantMessage);
                     }
@@ -878,7 +893,7 @@ function createWebUiServer({
                     });
                     publish('ui_control', { state: 'complete' });
                     publish('done', { message: assistantMessage });
-                });
+                }, conversationId);
                 sendJson(response, 202, { streamId });
                 return;
             }

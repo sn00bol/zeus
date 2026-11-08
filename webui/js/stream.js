@@ -57,6 +57,11 @@ export function watchChatStream({ streamId, onEvent }) {
             stop();
             resolve(data);
         });
+        listen('stopped', data => {
+            onEvent('stopped', data);
+            stop();
+            resolve({ stopped: true });
+        });
         listen('stream_error', data => {
             onEvent('stream_error', data);
             stop();

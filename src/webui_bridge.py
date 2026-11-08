@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -155,7 +156,7 @@ class WebUiBridge:
             body = await _read_json(receive)
             request = await _inference_request_from_body(body)
             if request.stream:
-                await _stream_inference(request, send)
+                await _stream_inference(request, receive, send)
                 return
             result = await _router.route(request)
         except ValueError as exc:
@@ -279,7 +280,7 @@ def _sse_chunk(event: str, data: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n".encode("utf-8")
 
 
-async def _stream_inference(request: InferenceRequest, send: Any) -> None:
+async def _stream_inference(request: InferenceRequest, receive: Any, send: Any) -> None:
     started = False
 
     async def emit(event: str, data: dict[str, Any]) -> None:
@@ -298,25 +299,51 @@ async def _stream_inference(request: InferenceRequest, send: Any) -> None:
             started = True
         await send({"type": "http.response.body", "body": chunk, "more_body": True})
 
-    try:
-        async def on_delta(text: str) -> None:
-            await emit("delta", {"text": text})
+    async def stream_response() -> None:
+        try:
+            async def on_delta(text: str) -> None:
+                await emit("delta", {"text": text})
 
-        async def on_thinking(text: str) -> None:
-            await emit("thinking", {"text": text})
+            async def on_thinking(text: str) -> None:
+                await emit("thinking", {"text": text})
 
-        result = await _router.route_stream(request, on_delta, on_thinking=on_thinking)
-        await emit("done", _response_payload(result))
-        await send({"type": "http.response.body", "body": b"", "more_body": False})
-    except Exception as exc:
-        log.exception("WebUI streaming inference failed.")
-        message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal inference error."
-        if not started:
-            status = 400 if isinstance(exc, ValueError) else 503 if isinstance(exc, RuntimeError) else 500
-            await _send_json(send, {"error": message}, status=status)
-            return
-        await emit("error", {"error": message})
-        await send({"type": "http.response.body", "body": b"", "more_body": False})
+            result = await _router.route_stream(request, on_delta, on_thinking=on_thinking)
+            await emit("done", _response_payload(result))
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        except Exception as exc:
+            log.exception("WebUI streaming inference failed.")
+            message = str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "Internal inference error."
+            if not started:
+                status = 400 if isinstance(exc, ValueError) else 503 if isinstance(exc, RuntimeError) else 500
+                await _send_json(send, {"error": message}, status=status)
+                return
+            await emit("error", {"error": message})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    async def wait_for_disconnect() -> None:
+        while True:
+            event = await receive()
+            if event["type"] == "http.disconnect":
+                return
+
+    inference_task = asyncio.create_task(stream_response())
+    disconnect_task = asyncio.create_task(wait_for_disconnect())
+    done, _ = await asyncio.wait(
+        (inference_task, disconnect_task),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if disconnect_task in done:
+        disconnect_task.result()
+        if not inference_task.done():
+            inference_task.cancel()
+            await asyncio.gather(inference_task, return_exceptions=True)
+        else:
+            await inference_task
+        return
+
+    disconnect_task.cancel()
+    await asyncio.gather(disconnect_task, return_exceptions=True)
+    await inference_task
 
 
 def create_app(*, browser_loop: BrowserLoop | None = None) -> WebUiBridge:

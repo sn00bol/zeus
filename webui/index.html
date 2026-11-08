@@ -9,7 +9,6 @@
     <meta name="zeus-version" content="">
     <title>ZEUS</title>
     <link rel="icon" href="/zeus.ico" sizes="any">
-    <link rel="preload" href="/font/Streetsign-Sans.otf" as="font" type="font/otf" crossorigin>
     <script>
         (() => {
             let theme = 'system';
@@ -153,16 +152,22 @@
         </aside>
         <main class="main">
             <section class="chat welcome-state">
+                <div class="chat-title-bar">
+                    <button class="chat-title-button" id="chat-title-button" type="button"
+                        title="Conversation options" aria-label="Conversation options" aria-expanded="false" hidden>
+                        <span class="chat-title-label" id="chat-title-label">New chat</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="m6 9 6 6 6-6" />
+                        </svg>
+                    </button>
+                    <div class="conversation-menu chat-menu" id="active-chat-menu" hidden></div>
+                </div>
                 <div class="chat-actions" id="chat-actions">
                     <button class="temp-chat-button" id="temp-chat-button" type="button"
                         title="Temporary chat" aria-label="Temporary chat" aria-pressed="false">
                         <img src="/icon/tempchat.png" width="16" height="16" alt="" class="temp-chat-icon">
                     </button>
-                    <button class="chat-more-button" id="chat-more-button" type="button"
-                        title="Conversation options" aria-label="Conversation options" aria-expanded="false" hidden>
-                        <img src="/icon/dots.png" width="18" height="18" alt="">
-                    </button>
-                    <div class="conversation-menu chat-menu" id="active-chat-menu" hidden></div>
                 </div>
                 <div class="chat-scroll" id="chat-scroll">
                     <div class="chat-content">
@@ -261,6 +266,11 @@
                                             <img src="/icon/send.png" width="16" height="16" alt="Send"
                                                 class="send-icon">
                                         </button>
+                                        <button class="send stop-button" id="stop-button" type="button"
+                                            aria-label="Stop generating" title="Stop generating" hidden disabled>
+                                            <img src="/icon/stop.png" width="16" height="16" alt=""
+                                                class="stop-icon">
+                                        </button>
                                     </div>
                                 </form>
                             </div>
@@ -286,6 +296,19 @@
             <div class="delete-dialog-actions">
                 <button class="dialog-cancel" type="submit" value="cancel">Cancel</button>
                 <button class="dialog-delete" type="submit" value="delete">Delete conversation</button>
+            </div>
+        </form>
+    </dialog>
+    <dialog class="rename-dialog" id="rename-dialog" aria-labelledby="rename-dialog-title">
+        <form id="rename-form">
+            <h2 id="rename-dialog-title">Rename conversation</h2>
+            <label for="rename-title-input">Conversation name</label>
+            <input class="rename-title-input" id="rename-title-input" type="text" maxlength="100"
+                autocomplete="off" required>
+            <p class="rename-dialog-error" id="rename-dialog-error" role="status"></p>
+            <div class="delete-dialog-actions">
+                <button class="dialog-cancel" id="rename-cancel" type="button">Cancel</button>
+                <button class="rename-dialog-save" type="submit">Save</button>
             </div>
         </form>
     </dialog>

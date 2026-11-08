@@ -1,4 +1,6 @@
 import { selectSession, startNewSession } from './session.js';
+import { renderMessageContent } from './render.js';
+import { buildConversationExportPage } from './conversationExport.js';
 
 export function initializeSidebar({ api, sessionId }) {
     const appElement = document.getElementById('app');
@@ -13,10 +15,17 @@ export function initializeSidebar({ api, sessionId }) {
     const searchInput = document.getElementById('search-modal-input');
     const searchResults = document.getElementById('search-results');
     const searchCloseBtn = document.getElementById('search-modal-close');
-    const activeMenuButton = document.getElementById('chat-more-button');
+    const activeMenuButton = document.getElementById('chat-title-button');
+    const activeTitleLabel = document.getElementById('chat-title-label');
     const activeMenu = document.getElementById('active-chat-menu');
+    const renameDialog = document.getElementById('rename-dialog');
+    const renameForm = document.getElementById('rename-form');
+    const renameInput = document.getElementById('rename-title-input');
+    const renameError = document.getElementById('rename-dialog-error');
+    const renameSaveButton = renameForm.querySelector('.rename-dialog-save');
     let activeSessionId = sessionId;
     let refreshTimer = null;
+    let renamingConversation = null;
 
     /** All loaded conversations (cache for search) */
     let allConversations = [];
@@ -44,64 +53,48 @@ export function initializeSidebar({ api, sessionId }) {
         });
     }
 
-    // ─── Rename inline form ───────────────────────────────────────────────────
+    function showRenameDialog(conversation) {
+        renamingConversation = conversation;
+        renameInput.value = conversation.preview;
+        renameError.textContent = '';
+        renameDialog.showModal();
+        renameInput.focus();
+        renameInput.select();
+    }
 
-    function beginRename(conversation, row, item) {
-        const form = document.createElement('form');
-        form.className = 'conversation-rename-form';
-        const input = document.createElement('input');
-        input.className = 'conversation-rename-input';
-        input.type = 'text';
-        input.maxLength = 100;
-        input.value = conversation.preview;
-        input.setAttribute('aria-label', 'Conversation title');
-        const error = document.createElement('span');
-        error.className = 'conversation-rename-error';
-        error.setAttribute('role', 'status');
+    renameForm.addEventListener('submit', async event => {
+        event.preventDefault();
+        if (!renamingConversation) return;
+        const title = renameInput.value.trim();
+        if (!title || title.length > 100) {
+            renameError.textContent = 'The title must be between 1 and 100 characters.';
+            renameInput.focus();
+            return;
+        }
+        renameSaveButton.disabled = true;
+        try {
+            await updateConversation(renamingConversation.conversation_id, 'rename', { title });
+        } catch (error) {
+            renameError.textContent = `Could not rename the conversation: ${error.message}`;
+            renameInput.focus();
+            renameSaveButton.disabled = false;
+            return;
+        }
+        renameDialog.close();
+        await loadConversations().catch(showConversationError);
+        renameSaveButton.disabled = false;
+    });
+    document.getElementById('rename-cancel').addEventListener('click', () => renameDialog.close());
+    renameDialog.addEventListener('close', () => { renamingConversation = null; });
 
-        const handleOutsideClick = event => {
-            if (!form.contains(event.target)) closeRename();
-        };
-        const closeRename = (restoreFocus = true) => {
-            document.removeEventListener('click', handleOutsideClick);
-            row.classList.remove('rename-active');
-            if (form.parentElement === row) {
-                row.replaceChild(item, form);
-                if (restoreFocus) item.focus();
-            }
-        };
-        form.append(input, error);
-        row.classList.add('rename-active');
-        row.replaceChild(form, item);
-        input.focus();
-        input.select();
-        queueMicrotask(() => document.addEventListener('click', handleOutsideClick));
-
-        input.addEventListener('keydown', event => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                closeRename();
-            }
-        });
-        form.addEventListener('submit', async event => {
-            event.preventDefault();
-            const title = input.value.trim();
-            if (!title || title.length > 100) {
-                error.textContent = 'The title must be between 1 and 100 characters.';
-                input.focus();
-                return;
-            }
-            input.disabled = true;
-            try {
-                await updateConversation(conversation.conversation_id, 'rename', { title });
-                closeRename(false);
-                await loadConversations();
-            } catch (updateError) {
-                input.disabled = false;
-                error.textContent = `Could not rename the conversation: ${updateError.message}`;
-                input.focus();
-            }
-        });
+    function updateActiveChatTitle() {
+        const conversation = activeConversation();
+        const title = activeSessionId.startsWith('temp-')
+            ? 'Temporary chat'
+            : conversation?.preview || 'New chat';
+        activeTitleLabel.textContent = title;
+        activeMenuButton.title = title;
+        activeMenuButton.setAttribute('aria-label', `${title} options`);
     }
 
     // ─── Load & render conversation list ──────────────────────────────────────
@@ -112,6 +105,7 @@ export function initializeSidebar({ api, sessionId }) {
             conversation => !conversation.conversation_id.startsWith('temp-'),
         );
         allConversations = visibleConversations; // cache for search
+        updateActiveChatTitle();
         document.querySelectorAll('.conversation-menu:not(.chat-menu)').forEach(el => el.remove());
         list.replaceChildren();
         pinnedList.replaceChildren();
@@ -251,7 +245,7 @@ export function initializeSidebar({ api, sessionId }) {
                     menu.hidden = true;
                     try {
                         if (action === 'rename') {
-                            beginRename(conversation, row, item);
+                            showRenameDialog(conversation);
                             return;
                         } else if (action === 'delete') {
                             if (!await confirmDelete(conversation.preview)) return;
@@ -301,14 +295,17 @@ export function initializeSidebar({ api, sessionId }) {
     function openMenu(button, menu) {
         const opening = menu.hidden;
         document.querySelectorAll('.conversation-menu').forEach(element => { element.hidden = true; });
-        document.querySelectorAll('.conversation-action[aria-expanded], .chat-more-button[aria-expanded]')
+        document.querySelectorAll('.conversation-action[aria-expanded], .chat-title-button[aria-expanded]')
             .forEach(element => element.setAttribute('aria-expanded', 'false'));
         if (!opening) return;
 
         menu.hidden = false;
         const bounds = button.getBoundingClientRect();
+        const menuLeft = button === activeMenuButton
+            ? document.querySelector('.sidebar').getBoundingClientRect().right + 8
+            : bounds.right - menu.offsetWidth;
         const left = Math.min(
-            Math.max(8, bounds.right - menu.offsetWidth),
+            Math.max(8, menuLeft),
             window.innerWidth - menu.offsetWidth - 8,
         );
         const below = bounds.bottom + 4;
@@ -325,13 +322,6 @@ export function initializeSidebar({ api, sessionId }) {
         ));
     }
 
-    function activeRowAndItem(conversation) {
-        const row = [...document.querySelectorAll('.conversation-row')].find(element => (
-            element.dataset.conversationId === conversation.conversation_id
-        ));
-        return row ? { row, item: row.querySelector('.conversation-item') } : null;
-    }
-
     function safeFilename(title) {
         const base = title.toLowerCase()
             .replace(/[^a-z0-9_-]+/g, '-')
@@ -346,9 +336,17 @@ export function initializeSidebar({ api, sessionId }) {
         );
         const printable = messages
             .filter(message => message.role === 'user' || message.role === 'assistant')
-            .map(message => `<section><h2>${escapeHtml(message.role === 'user' ? 'You' : 'ZEUS')}</h2><p>${escapeHtml(message.content || '')}</p></section>`)
-            .join('');
-        const page = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(conversation.preview)}</title><style>body{font:15px/1.6 Arial,sans-serif;max-width:820px;margin:40px auto;color:#222}h1{font-size:24px}h2{font-size:13px;color:#6b4b32}section{margin:24px 0;white-space:pre-wrap;overflow-wrap:anywhere}</style></head><body><h1>${escapeHtml(conversation.preview)}</h1>${printable}</body></html>`;
+            .map(message => {
+                const rendered = document.createElement('div');
+                renderMessageContent(rendered, message.content || '');
+                return { role: message.role, html: rendered.innerHTML };
+            });
+        const page = buildConversationExportPage({
+            title: conversation.preview,
+            messages: printable,
+            exportedAt: new Date().toLocaleString(),
+            katexStylesheetUrl: new URL('/vendor/katex/katex.min.css', window.location.origin).href,
+        });
         const filename = safeFilename(conversation.preview);
 
         if (format === 'pdf') {
@@ -356,10 +354,9 @@ export function initializeSidebar({ api, sessionId }) {
             printWindow.document.open();
             printWindow.document.write(page);
             printWindow.document.close();
-            window.setTimeout(() => {
-                printWindow.focus();
-                printWindow.print();
-            }, 250);
+            await waitForPrintResources(printWindow);
+            printWindow.focus();
+            printWindow.print();
             return;
         }
 
@@ -372,6 +369,31 @@ export function initializeSidebar({ api, sessionId }) {
         link.click();
         link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function waitForPrintResources(printWindow) {
+        const document = printWindow.document;
+        for (const image of document.images) image.loading = 'eager';
+        const resources = [
+            ...Array.from(document.querySelectorAll('link[rel="stylesheet"]')),
+            ...Array.from(document.images),
+        ].map(element => {
+            if (element.sheet || element.complete) return Promise.resolve();
+            return new Promise(resolve => {
+                element.addEventListener('load', resolve, { once: true });
+                element.addEventListener('error', resolve, { once: true });
+            });
+        });
+        if (document.fonts?.ready) resources.push(document.fonts.ready);
+
+        let timeout;
+        await Promise.race([
+            Promise.all(resources),
+            new Promise(resolve => {
+                timeout = window.setTimeout(resolve, 5000);
+            }),
+        ]);
+        if (timeout) window.clearTimeout(timeout);
     }
 
     function addActiveMenuAction(label, action, danger = false) {
@@ -387,8 +409,7 @@ export function initializeSidebar({ api, sessionId }) {
             if (!conversation) return;
             try {
                 if (action === 'rename') {
-                    const target = activeRowAndItem(conversation);
-                    if (target) beginRename(conversation, target.row, target.item);
+                    showRenameDialog(conversation);
                     return;
                 }
                 if (action === 'delete') {
@@ -551,9 +572,9 @@ export function initializeSidebar({ api, sessionId }) {
     });
 
     document.addEventListener('click', event => {
-        if (event.target.closest('.conversation-row, .conversation-menu, .chat-actions')) return;
+        if (event.target.closest('.conversation-row, .conversation-menu, .chat-title-bar, .chat-actions')) return;
         document.querySelectorAll('.conversation-menu').forEach(el => { el.hidden = true; });
-        document.querySelectorAll('.conversation-action[aria-expanded], .chat-more-button[aria-expanded]').forEach(el => {
+        document.querySelectorAll('.conversation-action[aria-expanded], .chat-title-button[aria-expanded]').forEach(el => {
             el.setAttribute('aria-expanded', 'false');
         });
     });
@@ -566,6 +587,7 @@ export function initializeSidebar({ api, sessionId }) {
         loadConversations,
         setSessionId(id) {
             activeSessionId = id;
+            updateActiveChatTitle();
             document.querySelectorAll('.conversation-row').forEach(row => {
                 if (row.dataset.conversationId === id) row.setAttribute('aria-current', 'page');
                 else row.removeAttribute('aria-current');

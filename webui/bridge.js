@@ -48,7 +48,13 @@ function requestJson(path, { method = 'GET', body, timeoutMs = 10_000 } = {}) {
     });
 }
 
-function requestSse(path, { method = 'POST', body, timeoutMs = 600_000, onEvent } = {}) {
+function requestSse(path, {
+    method = 'POST',
+    body,
+    timeoutMs = 600_000,
+    onEvent,
+    signal,
+} = {}) {
     const bridgeUrl = new URL(
         process.env.WEBUI_BRIDGE_URL
             || `http://127.0.0.1:${process.env.WEBUI_BRIDGE_PORT || '5002'}`,
@@ -142,6 +148,21 @@ function requestSse(path, { method = 'POST', body, timeoutMs = 600_000, onEvent 
             });
         }
         request.on('error', reject);
+        if (signal) {
+            const abort = () => {
+                const error = new Error('The model request was stopped.');
+                error.name = 'AbortError';
+                error.code = 'ABORT_ERR';
+                request.destroy(error);
+            };
+            if (signal.aborted) {
+                abort();
+                return;
+            } else {
+                signal.addEventListener('abort', abort, { once: true });
+                request.once('close', () => signal.removeEventListener('abort', abort));
+            }
+        }
         if (payload) request.write(payload);
         request.end();
     });

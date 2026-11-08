@@ -14,6 +14,13 @@
   </p>
 </div>
 
+> [!warning]
+> <b>ZEUS STILL PRE-RELEASE AND IN DEVELOPMENT, SO YOU COULD ENCOUNTER BUGS/ISSUE WHILE USING, PLEASE REPORT VIA [Issues](https://github.com/sn00bol/zeus/issues)</b>
+> 
+> <b>ONLY DOWNLOAD FROM GITHUB. ALL OTHER SOURCES ARE FAKE OR MAY CONTAIN VIRUSES</b>
+>
+> <b>ZEUS WILL AND NEVER HAVE ANY SUBSCRIPTION, PAYMENT, OR DONATION METHOD, I WILL NOT RESPONSIBILITY IF YOU DONATE TO UNKNOWN SOURCE</b>
+
 ## Features (DEMO)
 - **Literrally a chatbot** — You can ask anything all the earth, chatting like friends, explaining, do a basic math equations,...
 - **Analysis documents** — Support writing, spelling error checks, suggestion and basic Text Editor

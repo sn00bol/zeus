@@ -57,11 +57,14 @@ class StreamManager {
             bufferedBytes: 0,
             completedAt: null,
             conversationId,
+            controller: new AbortController(),
+            cancelled: false,
         };
         const streamId = randomUUID();
         this.streams.set(streamId, stream);
 
         const publish = (type, data) => {
+            if (stream.cancelled) return null;
             if (typeof type !== 'string' || !type) throw new TypeError('A stream event type is required.');
             const serialized = JSON.stringify(data);
             if (typeof serialized !== 'string') {
@@ -87,8 +90,9 @@ class StreamManager {
 
         publish('ui_control', { state: 'started' });
         stream.task = Promise.resolve()
-            .then(() => task(publish))
+            .then(() => task(publish, stream.controller.signal))
             .catch(error => {
+                if (stream.cancelled) return;
                 console.error('[WEBUI] Background chat stream failed:', error);
                 const message = error instanceof Error && error.message
                     ? error.message.slice(0, 160)
@@ -97,8 +101,10 @@ class StreamManager {
                 publish('stream_error', { message });
             })
             .finally(() => {
+                if (stream.cancelled) return;
                 if (!stream.events.some(event => (
                     event.type === 'done' || event.type === 'stream_error'
+                    || event.type === 'stopped'
                 ))) {
                     publish('stream_error', { message: 'The stream ended before completion.' });
                 }
@@ -120,6 +126,36 @@ class StreamManager {
             }
         }
         return null;
+    }
+
+    cancel(streamId) {
+        this.prune();
+        const stream = this.streams.get(streamId);
+        if (!stream || stream.completedAt !== null) return false;
+
+        stream.cancelled = true;
+        stream.completedAt = Date.now();
+        stream.controller.abort();
+        const event = { state: 'stopped' };
+        const serialized = JSON.stringify(event);
+        const size = Buffer.byteLength(serialized, 'utf8');
+        const stoppedEvent = {
+            id: stream.nextEventId++,
+            type: 'stopped',
+            data: event,
+            size,
+        };
+        stream.events.push(stoppedEvent);
+        stream.bufferedBytes += size;
+        while (
+            stream.events.length > this.maxEventsPerStream
+            || stream.bufferedBytes > this.maxBufferBytesPerStream
+        ) {
+            const expired = stream.events.shift();
+            stream.bufferedBytes -= expired.size;
+        }
+        for (const listener of stream.listeners) listener(stoppedEvent);
+        return true;
     }
 
     subscribe(streamId, response, lastEventId = 0) {
@@ -176,7 +212,9 @@ class StreamManager {
                 detach();
                 return;
             }
-            const terminal = event.type === 'done' || event.type === 'stream_error';
+            const terminal = event.type === 'done'
+                || event.type === 'stream_error'
+                || event.type === 'stopped';
             if (blocked) {
                 if (pendingBytes + event.size > MAX_PENDING_SUBSCRIBER_BYTES) {
                     detach();

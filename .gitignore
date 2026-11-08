@@ -26,6 +26,7 @@ database/history.json
 test/
 **/*.test.js
 !tests/platform_healthcheck.test.js
+!tests/title_generation.test.js
 **/*.test.cjs
 !tests/webui.test.cjs
 !tests/render-markdown.test.cjs
