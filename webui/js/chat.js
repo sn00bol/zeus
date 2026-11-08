@@ -43,6 +43,27 @@ const addMenu = document.getElementById('prompt-add-menu');
 const addFilesOption = document.getElementById('add-files-option');
 const searchOption = document.getElementById('add-search-option');
 const filesInput = document.getElementById('prompt-files-input');
+const imageViewer = document.getElementById('attachment-image-viewer');
+const imageStage = document.getElementById('attachment-image-stage');
+const imagePreview = document.getElementById('attachment-image-full');
+const imageVerticalScrollbar = document.getElementById('attachment-image-scrollbar-vertical');
+const imageHorizontalScrollbar = document.getElementById('attachment-image-scrollbar-horizontal');
+const imagePreviewTitle = document.getElementById('attachment-image-title');
+const imageZoomButton = document.getElementById('attachment-image-zoom');
+const imageZoomMenu = document.getElementById('attachment-image-zoom-menu');
+const imageDownloadButton = document.getElementById('attachment-image-download');
+const imageShareButton = document.getElementById('attachment-image-share');
+const imageCloseButton = document.getElementById('attachment-image-close');
+const filePreview = document.getElementById('attachment-file-preview');
+const filePreviewTitle = document.getElementById('attachment-file-title');
+const fileCodeView = document.getElementById('attachment-code-view');
+const fileVerticalScrollbar = document.getElementById('attachment-file-scrollbar-vertical');
+const fileHorizontalScrollbar = document.getElementById('attachment-file-scrollbar-horizontal');
+const fileCopyButton = document.getElementById('attachment-file-copy');
+const fileDownloadButton = document.getElementById('attachment-file-download');
+const fileShareButton = document.getElementById('attachment-file-share');
+const fileCloseButton = document.getElementById('attachment-file-close');
+const fileResizeHandle = document.getElementById('attachment-file-resize-handle');
 const modelButton = document.getElementById('model-picker-button');
 const modelLabel = document.getElementById('model-picker-label');
 const modelMenu = document.getElementById('model-picker-menu');
@@ -62,6 +83,14 @@ let settings = null;
 let availableTools = [];
 let selectedTools = [];
 let selectedAttachments = [];
+let activeAttachmentPreview = null;
+let imageZoomPercent = 100;
+let imagePan = null;
+let codeScrollbarSequence = 0;
+let filePreviewCloseTimer = null;
+let filePreviewResize = null;
+const actionFeedbackTimers = new WeakMap();
+const codeScrollbarInstances = new WeakMap();
 let activeToolOption = 0;
 let thinkingMode = localStorage.getItem('zeus.webui.thinking_mode') || 'auto'; // 'auto' | 'on' | 'off'
 let promptScrollDragging = false;
@@ -150,6 +179,7 @@ if (tempChatButton) {
             document.getElementById('welcome-subtitle').hidden = false;
             setEmptyChatLayout(true);
             input.value = '';
+            closeAttachmentPreview({ restoreFocus: false });
             selectedAttachments = [];
             renderSelectedAttachments();
             selectedTools = [];
@@ -243,6 +273,117 @@ initializeScrollbar({
     },
     observe: [document.querySelector('.chat-content')],
 });
+
+function layoutImageScrollbar(scrollbar) {
+    const viewerBounds = imageViewer.getBoundingClientRect();
+    const stageBounds = imageStage.getBoundingClientRect();
+    scrollbar.style.top = `${stageBounds.top - viewerBounds.top}px`;
+    scrollbar.style.left = `${stageBounds.left - viewerBounds.left}px`;
+    scrollbar.style.width = `${stageBounds.width}px`;
+    scrollbar.style.height = `${stageBounds.height}px`;
+}
+
+const imageVerticalScroll = initializeScrollbar({
+    scrollElement: imageStage,
+    scrollbar: imageVerticalScrollbar,
+    thumb: imageVerticalScrollbar.querySelector('.chat-scrollbar-thumb'),
+    layoutTrack: () => layoutImageScrollbar(imageVerticalScrollbar),
+    onScrollableChange: () => {
+        imageStage.classList.toggle(
+            'is-draggable',
+            imageStage.scrollWidth > imageStage.clientWidth + 1
+                || imageStage.scrollHeight > imageStage.clientHeight + 1,
+        );
+    },
+    observe: [imagePreview],
+});
+const imageHorizontalScroll = initializeScrollbar({
+    scrollElement: imageStage,
+    scrollbar: imageHorizontalScrollbar,
+    thumb: imageHorizontalScrollbar.querySelector('.chat-scrollbar-thumb'),
+    axis: 'horizontal',
+    layoutTrack: () => layoutImageScrollbar(imageHorizontalScrollbar),
+    onScrollableChange: () => {
+        imageStage.classList.toggle(
+            'is-draggable',
+            imageStage.scrollWidth > imageStage.clientWidth + 1
+                || imageStage.scrollHeight > imageStage.clientHeight + 1,
+        );
+    },
+    observe: [imagePreview],
+});
+
+function layoutFileScrollbar(scrollbar) {
+    const previewBounds = filePreview.getBoundingClientRect();
+    const codeBounds = fileCodeView.getBoundingClientRect();
+    scrollbar.style.top = `${codeBounds.top - previewBounds.top}px`;
+    scrollbar.style.left = `${codeBounds.left - previewBounds.left}px`;
+    scrollbar.style.width = `${codeBounds.width}px`;
+    scrollbar.style.height = `${codeBounds.height}px`;
+}
+
+const fileVerticalScroll = initializeScrollbar({
+    scrollElement: fileCodeView,
+    scrollbar: fileVerticalScrollbar,
+    thumb: fileVerticalScrollbar.querySelector('.chat-scrollbar-thumb'),
+    layoutTrack: () => layoutFileScrollbar(fileVerticalScrollbar),
+    onScrollableChange: isScrollable => {
+        fileCodeView.classList.toggle('has-vertical-scrollbar', isScrollable);
+    },
+    observe: [filePreview],
+});
+const fileHorizontalScroll = initializeScrollbar({
+    scrollElement: fileCodeView,
+    scrollbar: fileHorizontalScrollbar,
+    thumb: fileHorizontalScrollbar.querySelector('.chat-scrollbar-thumb'),
+    axis: 'horizontal',
+    layoutTrack: () => layoutFileScrollbar(fileHorizontalScrollbar),
+    onScrollableChange: isScrollable => {
+        fileCodeView.classList.toggle('has-horizontal-scrollbar', isScrollable);
+    },
+    observe: [filePreview],
+});
+
+function destroyCodeScrollbars(container) {
+    for (const scrollbar of codeScrollbarInstances.get(container) || []) {
+        scrollbar.destroy();
+    }
+    codeScrollbarInstances.delete(container);
+    container.querySelectorAll('.code-horizontal-scrollbar').forEach(scrollbar => scrollbar.remove());
+}
+
+function initializeCodeScrollbars(container) {
+    destroyCodeScrollbars(container);
+    const instances = [];
+    for (const code of container.querySelectorAll('pre code')) {
+        const pre = code.closest('pre');
+        if (!pre) continue;
+        code.classList.add('has-custom-scrollbar');
+        const scrollbar = document.createElement('div');
+        scrollbar.className = 'chat-scrollbar code-horizontal-scrollbar';
+        code.id ||= `message-code-${++codeScrollbarSequence}`;
+        scrollbar.setAttribute('role', 'scrollbar');
+        scrollbar.setAttribute('aria-label', 'Code horizontal scroll position');
+        scrollbar.setAttribute('aria-controls', code.id);
+        scrollbar.setAttribute('aria-orientation', 'horizontal');
+        scrollbar.setAttribute('aria-valuemin', '0');
+        scrollbar.setAttribute('aria-valuemax', '1000');
+        scrollbar.setAttribute('aria-valuenow', '0');
+        scrollbar.tabIndex = -1;
+        const thumb = document.createElement('div');
+        thumb.className = 'chat-scrollbar-thumb';
+        scrollbar.append(thumb);
+        pre.append(scrollbar);
+        instances.push(initializeScrollbar({
+            scrollElement: code,
+            scrollbar,
+            thumb,
+            axis: 'horizontal',
+            observe: [pre],
+        }));
+    }
+    codeScrollbarInstances.set(container, instances);
+}
 
 function updatePromptScrollBar() {
     const maxScroll = input.scrollHeight - input.clientHeight;
@@ -392,6 +533,7 @@ function addMessage(
                 : content,
         );
         addCodeCopyControls(contentElement);
+        initializeCodeScrollbars(contentElement);
     } else {
         contentElement.textContent = content;
     }
@@ -431,7 +573,9 @@ function addMessage(
         item.append(attachmentList);
     }
     body.append(thinking, contentElement, details);
-    item.append(body);
+    if (!(role === 'user' && attachments.length && !String(content ?? '').trim())) {
+        item.append(body);
+    }
     container.append(item);
     if (container === messagesElement) {
         welcomeElement.hidden = true;
@@ -441,6 +585,7 @@ function addMessage(
 }
 
 function setAssistantContent(message, content, sources = []) {
+    destroyCodeScrollbars(message.contentElement);
     message.contentElement.className = 'message-content';
     renderMessageContent(
         message.contentElement,
@@ -449,6 +594,7 @@ function setAssistantContent(message, content, sources = []) {
             : content,
     );
     addCodeCopyControls(message.contentElement);
+    initializeCodeScrollbars(message.contentElement);
     if (messagesElement.contains(message.item)) scrollToLatest(false);
 }
 
@@ -693,6 +839,16 @@ function renderAttachments(container, attachments, { removable = false } = {}) {
             fileLabel.textContent = attachment.name;
             item.append(fileIcon, fileLabel);
         }
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
+        item.setAttribute('aria-label', `Preview ${attachment.name}`);
+        item.addEventListener('click', () => openAttachmentPreview(attachment, item));
+        item.addEventListener('keydown', event => {
+            if (event.target !== item) return;
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openAttachmentPreview(attachment, item);
+        });
         if (removable) {
             const remove = document.createElement('button');
             remove.type = 'button';
@@ -700,7 +856,11 @@ function renderAttachments(container, attachments, { removable = false } = {}) {
             remove.setAttribute('aria-label', `Remove ${attachment.name}`);
             remove.title = `Remove ${attachment.name}`;
             remove.textContent = '×';
-            remove.addEventListener('click', () => {
+            remove.addEventListener('click', event => {
+                event.stopPropagation();
+                if (activeAttachmentPreview?.attachment.id === attachment.id) {
+                    closeAttachmentPreview({ restoreFocus: false });
+                }
                 selectedAttachments = selectedAttachments.filter(item => item.id !== attachment.id);
                 renderSelectedAttachments();
                 resizePrompt();
@@ -714,12 +874,343 @@ function renderAttachments(container, attachments, { removable = false } = {}) {
     }
 }
 
+function getAttachmentLanguage(name) {
+    const extension = getFileExtension(name);
+    const languages = {
+        bash: 'bash', c: 'c', cc: 'cpp', cpp: 'cpp', cs: 'csharp', css: 'css',
+        dart: 'dart', go: 'go', h: 'c', hpp: 'cpp', html: 'html', java: 'java',
+        js: 'javascript', json: 'json', jsx: 'jsx', kt: 'kotlin', lua: 'lua',
+        md: 'markdown', mjs: 'javascript', php: 'php', py: 'python', rb: 'ruby',
+        rs: 'rust', sh: 'bash', sql: 'sql', swift: 'swift', ts: 'typescript',
+        tsx: 'tsx', xml: 'xml', yaml: 'yaml', yml: 'yaml',
+    };
+    return languages[extension] || '';
+}
+
+function closeAttachmentPreview({ restoreFocus = true } = {}) {
+    const preview = activeAttachmentPreview;
+    imageViewer.hidden = true;
+    imageViewer.classList.remove('is-zoomed');
+    imageStage.classList.remove('is-dragging');
+    imagePan = null;
+    filePreview.classList.remove('is-open');
+    window.clearTimeout(filePreviewCloseTimer);
+    filePreviewCloseTimer = window.setTimeout(() => {
+        if (!activeAttachmentPreview || activeAttachmentPreview.attachment.kind === 'image') {
+            filePreview.hidden = true;
+        }
+    }, 240);
+    fileCodeView.replaceChildren();
+    fileCodeView.scrollTo(0, 0);
+    activeAttachmentPreview = null;
+    imageZoomMenu.hidden = true;
+    imageZoomButton.setAttribute('aria-expanded', 'false');
+    if (restoreFocus && preview?.element?.isConnected) preview.element.focus();
+}
+
+function setImageZoom(percent) {
+    imageZoomPercent = percent;
+    imageZoomButton.querySelector('span').textContent = `${percent}%`;
+    imageZoomButton.setAttribute('aria-label', `Image zoom: ${percent}%`);
+    imagePreview.style.width = `${imagePreview.naturalWidth * percent / 100}px`;
+    imagePreview.style.height = `${imagePreview.naturalHeight * percent / 100}px`;
+    for (const option of imageZoomMenu.querySelectorAll('[data-zoom]')) {
+        option.setAttribute('aria-selected', String(Number(option.dataset.zoom) === percent));
+    }
+    requestAnimationFrame(() => {
+        imageVerticalScroll.update();
+        imageHorizontalScroll.update();
+    });
+}
+
+function openAttachmentPreview(attachment, element) {
+    closeAttachmentPreview({ restoreFocus: false });
+    activeAttachmentPreview = { attachment, element };
+    if (attachment.kind === 'image' && attachment.data) {
+        imagePreviewTitle.textContent = attachment.name;
+        imagePreview.src = attachment.data;
+        imagePreview.alt = attachment.name;
+        imageViewer.hidden = false;
+        imageStage.scrollTo(0, 0);
+        imageZoomMenu.hidden = true;
+        imageZoomButton.setAttribute('aria-expanded', 'false');
+        setImageZoom(imageZoomPercent);
+        requestAnimationFrame(() => {
+            imageVerticalScroll.update();
+            imageHorizontalScroll.update();
+        });
+        imageCloseButton.focus();
+        return;
+    }
+
+    filePreviewTitle.textContent = attachment.name;
+    fileCodeView.replaceChildren();
+    const rendered = document.createElement('div');
+    rendered.className = 'message-content attachment-code-rendered';
+    const language = getAttachmentLanguage(attachment.name);
+    const text = attachment.text || '';
+    let longestFence = 0;
+    for (const match of text.matchAll(/`+/g)) {
+        longestFence = Math.max(longestFence, match[0].length);
+    }
+    const fence = '`'.repeat(Math.max(3, longestFence + 1));
+    try {
+        renderMessageContent(rendered, `${fence}${language}\n${text}\n${fence}`);
+    } catch (error) {
+        console.error('[WEBUI] Could not render attached file preview:', error);
+        const pre = document.createElement('pre');
+        const code = document.createElement('code');
+        code.textContent = text;
+        pre.append(code);
+        rendered.append(pre);
+    }
+
+    const pre = rendered.querySelector('pre');
+    if (pre) {
+        const code = pre.querySelector('code');
+        const lineCount = Math.max(
+            1,
+            text.split(/\r\n|\n|\r/).length - (/\r?\n$/.test(text) ? 1 : 0),
+        );
+        const line = document.createElement('div');
+        line.className = 'attachment-code-line';
+        const numbers = document.createElement('div');
+        numbers.className = 'attachment-code-numbers';
+        numbers.setAttribute('aria-hidden', 'true');
+        numbers.innerHTML = Array.from({ length: lineCount }, (_, index) => `<span>${index + 1}</span>`).join('');
+        pre.replaceWith(line);
+        line.append(numbers, pre);
+        if (code) code.setAttribute('aria-label', attachment.name);
+    }
+    fileCodeView.append(rendered);
+    window.clearTimeout(filePreviewCloseTimer);
+    filePreview.hidden = false;
+    requestAnimationFrame(() => {
+        filePreview.classList.add('is-open');
+        fileVerticalScroll.update();
+        fileHorizontalScroll.update();
+    });
+    fileCopyButton.focus();
+}
+
+function downloadAttachment(attachment) {
+    let url = attachment.data;
+    if (!url) {
+        url = URL.createObjectURL(new Blob([attachment.text || ''], { type: attachment.type || 'text/plain' }));
+    }
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = attachment.name;
+    link.click();
+    if (url.startsWith('blob:')) window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+function showActionSuccess(button, label, ariaLabel) {
+    window.clearTimeout(actionFeedbackTimers.get(button));
+    button.classList.add('is-success');
+    button.title = label;
+    button.setAttribute('aria-label', ariaLabel);
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>';
+    actionFeedbackTimers.set(button, window.setTimeout(() => {
+        button.classList.remove('is-success');
+        button.title = button.dataset.defaultTitle;
+        button.setAttribute('aria-label', button.dataset.defaultLabel);
+        button.innerHTML = button.dataset.defaultIcon;
+    }, 1_500));
+}
+
+async function shareAttachment(attachment) {
+    if (typeof navigator.share !== 'function') {
+        window.alert('Sharing files is not supported by this browser.');
+        return;
+    }
+    try {
+        let file;
+        if (attachment.kind === 'image') {
+            const response = await fetch(attachment.data);
+            if (!response.ok) throw new Error(`Could not read ${attachment.name} for sharing.`);
+            file = new File([await response.blob()], attachment.name, { type: attachment.type });
+        } else {
+            file = new File([attachment.text || ''], attachment.name, {
+                type: attachment.type || 'text/plain',
+            });
+        }
+        if (typeof navigator.canShare === 'function' && !navigator.canShare({ files: [file] })) {
+            throw new Error('Sharing files is not supported by this browser.');
+        }
+        await navigator.share({ files: [file], title: attachment.name });
+    } catch (error) {
+        if (error.name === 'AbortError') return;
+        console.error('[WEBUI] Could not share attachment:', error);
+        window.alert(`Could not share ${attachment.name}: ${error.message}`);
+    }
+}
+
+imageCloseButton.addEventListener('click', () => closeAttachmentPreview());
+fileCloseButton.addEventListener('click', () => closeAttachmentPreview());
+imageViewer.addEventListener('click', event => {
+    if (event.target === imageViewer) closeAttachmentPreview();
+});
+imageZoomButton.addEventListener('click', () => {
+    imageZoomMenu.hidden = !imageZoomMenu.hidden;
+    imageZoomButton.setAttribute('aria-expanded', String(!imageZoomMenu.hidden));
+});
+imageZoomMenu.addEventListener('click', event => {
+    const option = event.target.closest('[data-zoom]');
+    if (!option) return;
+    setImageZoom(Number(option.dataset.zoom));
+    imageZoomMenu.hidden = true;
+    imageZoomButton.setAttribute('aria-expanded', 'false');
+});
+document.addEventListener('click', event => {
+    if (imageZoomButton.contains(event.target) || imageZoomMenu.contains(event.target)) return;
+    imageZoomMenu.hidden = true;
+    imageZoomButton.setAttribute('aria-expanded', 'false');
+});
+imagePreview.addEventListener('load', () => setImageZoom(imageZoomPercent));
+imagePreview.addEventListener('dragstart', event => event.preventDefault());
+imageStage.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target !== imagePreview) return;
+    if (imageStage.scrollWidth <= imageStage.clientWidth + 1
+        && imageStage.scrollHeight <= imageStage.clientHeight + 1) return;
+    imagePan = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scrollLeft: imageStage.scrollLeft,
+        scrollTop: imageStage.scrollTop,
+    };
+    imageStage.classList.add('is-dragging');
+    imageStage.setPointerCapture(event.pointerId);
+    event.preventDefault();
+});
+imageStage.addEventListener('pointermove', event => {
+    if (!imagePan || imagePan.pointerId !== event.pointerId) return;
+    imageStage.scrollLeft = imagePan.scrollLeft + imagePan.clientX - event.clientX;
+    imageStage.scrollTop = imagePan.scrollTop + imagePan.clientY - event.clientY;
+});
+const stopImageDrag = event => {
+    if (!imagePan || imagePan.pointerId !== event.pointerId) return;
+    imagePan = null;
+    imageStage.classList.remove('is-dragging');
+};
+imageStage.addEventListener('pointerup', stopImageDrag);
+imageStage.addEventListener('pointercancel', stopImageDrag);
+imageDownloadButton.addEventListener('click', () => {
+    if (!activeAttachmentPreview) return;
+    try {
+        downloadAttachment(activeAttachmentPreview.attachment);
+        showActionSuccess(imageDownloadButton, 'Downloaded', 'Image download started');
+    } catch (error) {
+        console.error('[WEBUI] Could not download image attachment:', error);
+        window.alert(`Could not download ${activeAttachmentPreview.attachment.name}: ${error.message}`);
+    }
+});
+imageShareButton.addEventListener('click', () => {
+    if (activeAttachmentPreview) shareAttachment(activeAttachmentPreview.attachment);
+});
+fileDownloadButton.addEventListener('click', () => {
+    if (!activeAttachmentPreview) return;
+    try {
+        downloadAttachment(activeAttachmentPreview.attachment);
+        showActionSuccess(fileDownloadButton, 'Downloaded', 'File download started');
+    } catch (error) {
+        console.error('[WEBUI] Could not download file attachment:', error);
+        window.alert(`Could not download ${activeAttachmentPreview.attachment.name}: ${error.message}`);
+    }
+});
+fileShareButton.addEventListener('click', () => {
+    if (activeAttachmentPreview) shareAttachment(activeAttachmentPreview.attachment);
+});
+fileCopyButton.addEventListener('click', async () => {
+    if (!activeAttachmentPreview) return;
+    try {
+        await navigator.clipboard.writeText(activeAttachmentPreview.attachment.text || '');
+        showActionSuccess(fileCopyButton, 'Copied', 'File contents copied');
+    } catch (error) {
+        console.error('[WEBUI] Could not copy attached file:', error);
+        window.alert(`Could not copy ${activeAttachmentPreview.attachment.name}: ${error.message}`);
+    }
+});
+for (const button of [imageDownloadButton, fileCopyButton, fileDownloadButton]) {
+    button.dataset.defaultTitle = button.title;
+    button.dataset.defaultLabel = button.getAttribute('aria-label');
+    button.dataset.defaultIcon = button.innerHTML;
+}
+
+fileResizeHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || window.innerWidth <= 700) return;
+    filePreviewResize = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startWidth: filePreview.getBoundingClientRect().width,
+    };
+    filePreview.classList.add('is-resizing');
+    fileResizeHandle.setPointerCapture(event.pointerId);
+    event.preventDefault();
+});
+fileResizeHandle.addEventListener('pointermove', event => {
+    if (!filePreviewResize || event.pointerId !== filePreviewResize.pointerId) return;
+    const minWidth = 280;
+    const maxWidth = Math.max(minWidth, Math.floor(window.innerWidth * 0.75));
+    const width = Math.min(maxWidth, Math.max(
+        minWidth,
+        filePreviewResize.startWidth + filePreviewResize.startX - event.clientX,
+    ));
+    filePreview.style.width = `${width}px`;
+    fileResizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
+});
+const finishFilePreviewResize = event => {
+    if (!filePreviewResize || event.pointerId !== filePreviewResize.pointerId) return;
+    filePreviewResize = null;
+    filePreview.classList.remove('is-resizing');
+};
+fileResizeHandle.addEventListener('pointerup', finishFilePreviewResize);
+fileResizeHandle.addEventListener('pointercancel', finishFilePreviewResize);
+fileResizeHandle.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const currentWidth = filePreview.getBoundingClientRect().width;
+    const delta = event.key === 'ArrowLeft' ? 24 : -24;
+    const minWidth = 280;
+    const maxWidth = Math.max(minWidth, Math.floor(window.innerWidth * 0.75));
+    const width = Math.min(maxWidth, Math.max(minWidth, currentWidth + delta));
+    filePreview.style.width = `${width}px`;
+    fileResizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
+});
+window.addEventListener('resize', () => {
+    if (filePreview.hidden || window.innerWidth <= 700) return;
+    const minWidth = 280;
+    const maxWidth = Math.max(minWidth, Math.floor(window.innerWidth * 0.75));
+    const width = Math.min(maxWidth, Math.max(minWidth, filePreview.getBoundingClientRect().width));
+    filePreview.style.width = `${width}px`;
+    fileResizeHandle.setAttribute('aria-valuemax', String(maxWidth));
+    fileResizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
+});
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    if (!imageZoomMenu.hidden) {
+        imageZoomMenu.hidden = true;
+        imageZoomButton.setAttribute('aria-expanded', 'false');
+        imageZoomButton.focus();
+        return;
+    }
+    if (activeAttachmentPreview) closeAttachmentPreview();
+});
+
 function renderSelectedAttachments() {
     const hasAttachments = selectedAttachments.length > 0;
     renderAttachments(promptAttachmentsElement, selectedAttachments, { removable: true });
     form.classList.toggle('has-attachments', hasAttachments);
-    if (hasAttachments) composerActions.prepend(addButton);
-    else promptInputWrap.prepend(addButton);
+    updateAddButtonPlacement();
+}
+
+function updateAddButtonPlacement() {
+    if (selectedAttachments.length || form.classList.contains('multiline')) {
+        composerActions.prepend(addButton);
+    } else {
+        promptInputWrap.prepend(addButton);
+    }
 }
 
 filesInput.addEventListener('change', async () => {
@@ -901,6 +1392,7 @@ function resizePrompt() {
     const multiline = height > 48;
     form.classList.toggle('multiline', multiline);
     input.style.height = `${Math.min(height, 170)}px`;
+    updateAddButtonPlacement();
     updatePromptScrollBar();
 }
 
@@ -1046,6 +1538,7 @@ form.addEventListener('submit', async event => {
     chatActions.hidden = false;
     if (chatMoreButton) chatMoreButton.hidden = Boolean(temporaryMessages);
     input.value = '';
+    closeAttachmentPreview({ restoreFocus: false });
     selectedAttachments = [];
     renderSelectedAttachments();
     selectedTools = [];
@@ -1157,6 +1650,7 @@ function loadHistory(sessionId, messageContainer) {
 
 async function switchSession(sessionId) {
     if (isTempChat) setTempChatMode(false);
+    closeAttachmentPreview({ restoreFocus: false });
     const sequence = ++switchSequence;
     sessionDrafts.set(conversationId, input.value);
     sessionDraftAttachments.set(conversationId, selectedAttachments);

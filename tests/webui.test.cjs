@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
 const http = require('node:http');
 const test = require('node:test');
 
@@ -9,6 +10,19 @@ const {
     createTitleGenerationService,
     normalizeGeneratedTitle,
 } = require('../webui/js/title');
+
+test('image preview exposes zoom presets and custom pan scrollbars without floating prompt actions', () => {
+    const markup = fs.readFileSync('webui/index.html', 'utf8');
+    assert.match(markup, /data-zoom="25"/);
+    assert.match(markup, /data-zoom="200"/);
+    assert.match(markup, /id="attachment-image-scrollbar-vertical"/);
+    assert.match(markup, /id="attachment-image-scrollbar-horizontal"/);
+    assert.match(markup, /id="attachment-file-scrollbar-vertical"/);
+    assert.match(markup, /id="attachment-file-scrollbar-horizontal"/);
+    assert.doesNotMatch(markup, /attachment-image-floating-prompt|attachment-image-prompt-form|data-image-action=/);
+    assert.match(markup, /id="prompt-add-button"/);
+    assert.match(markup, /id="message-input"/);
+});
 
 test('server-side streams outlive SSE subscribers and replay bounded buffered events', async () => {
     const manager = new StreamManager({
@@ -568,8 +582,8 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.menubar-brand img \{ filter: grayscale\(1\) brightness\(\.55\); \}/);
         assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode \.temp-chat-button img,/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle img,[\s\S]*?filter: brightness\(0\);/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: #0000000a;/);
-        assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-settings-button:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover[\s\S]*?background: #ffffff0c;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover,[\s\S]*?background-color: #0000000a;/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="dark"\] \.menu-toggle:hover,[\s\S]*?\.sidebar-search-btn:hover,[\s\S]*?\.new-chat:hover,[\s\S]*?\.temp-chat-button:hover,[\s\S]*?\.chat-more-button:hover,[\s\S]*?background-color: #ffffff0c;/);
         assert.match(theme.body.toString('utf8'), /\.menu-toggle \{[^}]*appearance: none;[^}]*background: transparent;/);
         assert.match(theme.body.toString('utf8'), /body\[data-theme-mode="light"\] \.menu-toggle:hover \.sidebar-icon,[\s\S]*?filter: brightness\(0\);/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.thinking-mode-button\.active/);
@@ -601,6 +615,13 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.send-icon \{ filter: brightness\(0\) invert\(1\); \}/);
         assert.doesNotMatch(theme.body.toString('utf8'), /\.composer:focus-within/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content pre code \{ color: #262626; \}/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.attachment-code-rendered pre code \{ color: #262626; \}/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content pre code \.tok-kw/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.attachment-code-rendered pre code \.tok-kw/);
+        assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.attachment-preview-button \{ color: #404040; border-color: transparent; background: transparent; \}/);
+        assert.match(theme.body.toString('utf8'), /\.attachment-preview-button \{[^}]*border: 1px solid transparent;[^}]*background: transparent;/);
+        assert.match(theme.body.toString('utf8'), /body\.temp-chat-mode\[data-theme-mode="light"\] \.attachment-preview-button \{ color: #f3f4f6; border-color: transparent; background: transparent; \}/);
+        assert.match(theme.body.toString('utf8'), /\.message-content pre > \.code-horizontal-scrollbar/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.math-inline,/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.markdown-table th \{ color: #262626; background: #f5f5f5;/);
         assert.match(theme.body.toString('utf8'), /body:not\(\.temp-chat-mode\)\[data-theme-mode="light"\] \.message-content mark \{ color: #713f12; background: #fef08a; \}/);
@@ -737,6 +758,15 @@ test('WebUI uses its bridge and supports reconnecting to a server-side stream', 
         const pageMarkup = page.body.toString('utf8');
         assert.match(pageMarkup, /<aside class="sidebar"[\s\S]*?<button class="sidebar-settings-button" id="settings-open-button"/);
         assert.doesNotMatch(pageMarkup, /<div class="chat-actions"[\s\S]*?id="settings-open-button"/);
+        assert.match(pageMarkup, /id="attachment-image-viewer"/);
+        assert.match(pageMarkup, /id="attachment-image-zoom"/);
+        assert.match(pageMarkup, /data-zoom="25"/);
+        assert.match(pageMarkup, /data-zoom="200"/);
+        assert.doesNotMatch(pageMarkup, /attachment-image-floating-prompt|attachment-image-prompt-form|data-image-action=/);
+        assert.match(pageMarkup, /id="attachment-file-preview"/);
+        assert.match(pageMarkup, /id="attachment-file-copy"/);
+        assert.match(pageMarkup, /id="attachment-file-scrollbar-horizontal"/);
+        assert.match(pageMarkup, /id="attachment-file-resize-handle"/);
 
         const renderer = await requestRaw('/js/render.js');
         assert.equal(renderer.status, 200);

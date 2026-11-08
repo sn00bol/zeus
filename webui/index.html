@@ -307,6 +307,122 @@
             <div class="search-results" id="search-results"></div>
         </div>
     </div>
+    <div class="attachment-image-viewer" id="attachment-image-viewer" hidden
+        role="dialog" aria-modal="true" aria-label="Image preview">
+        <div class="attachment-image-stage" id="attachment-image-stage">
+            <img class="attachment-image-full" id="attachment-image-full" alt="">
+        </div>
+        <div class="attachment-image-scrollbar attachment-image-scrollbar-vertical chat-scrollbar"
+            id="attachment-image-scrollbar-vertical" role="scrollbar" tabindex="-1"
+            aria-label="Image vertical scroll position" aria-controls="attachment-image-stage"
+            aria-orientation="vertical" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0">
+            <div class="chat-scrollbar-thumb"></div>
+        </div>
+        <div class="attachment-image-scrollbar attachment-image-scrollbar-horizontal chat-scrollbar"
+            id="attachment-image-scrollbar-horizontal" role="scrollbar" tabindex="-1"
+            aria-label="Image horizontal scroll position" aria-controls="attachment-image-stage"
+            aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0">
+            <div class="chat-scrollbar-thumb"></div>
+        </div>
+        <div class="attachment-preview-toolbar">
+            <span class="attachment-preview-title" id="attachment-image-title"></span>
+            <div class="attachment-preview-actions">
+                <div class="attachment-zoom-control">
+                    <button class="attachment-preview-button attachment-zoom-button" id="attachment-image-zoom"
+                        type="button" aria-label="Image zoom: 100%" title="Choose image zoom" aria-haspopup="listbox"
+                        aria-expanded="false" aria-controls="attachment-image-zoom-menu">
+                        <span>100%</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="m7 10 5 5 5-5"></path>
+                        </svg>
+                    </button>
+                    <div class="attachment-image-zoom-menu" id="attachment-image-zoom-menu"
+                        role="listbox" aria-label="Image zoom" hidden>
+                        <button type="button" role="option" aria-selected="false" data-zoom="25">25%</button>
+                        <button type="button" role="option" aria-selected="false" data-zoom="50">50%</button>
+                        <button type="button" role="option" aria-selected="false" data-zoom="75">75%</button>
+                        <button type="button" role="option" aria-selected="true" data-zoom="100">100%</button>
+                        <button type="button" role="option" aria-selected="false" data-zoom="125">125%</button>
+                        <button type="button" role="option" aria-selected="false" data-zoom="150">150%</button>
+                        <button type="button" role="option" aria-selected="false" data-zoom="200">200%</button>
+                    </div>
+                </div>
+                <button class="attachment-preview-button" id="attachment-image-download"
+                    type="button" aria-label="Download image" title="Download">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"></path>
+                    </svg>
+                </button>
+                <button class="attachment-preview-button" id="attachment-image-share"
+                    type="button" aria-label="Share image" title="Share">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="18" cy="5" r="3"></circle>
+                        <circle cx="6" cy="12" r="3"></circle>
+                        <circle cx="18" cy="19" r="3"></circle>
+                        <path d="m8.7 10.5 6.6-4m-6.6 9 6.6 4"></path>
+                    </svg>
+                </button>
+                <button class="attachment-preview-button" id="attachment-image-close"
+                    type="button" aria-label="Close image preview" title="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m6 6 12 12M18 6 6 18"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <aside class="attachment-file-preview" id="attachment-file-preview" hidden
+        role="dialog" aria-modal="false" aria-label="File preview">
+        <div class="attachment-file-resize-handle" id="attachment-file-resize-handle"
+            role="separator" aria-label="Resize file preview" aria-orientation="vertical"
+            aria-valuemin="280" aria-valuemax="1200" aria-valuenow="480" tabindex="0"></div>
+        <header class="attachment-file-preview-header">
+            <span class="attachment-preview-title" id="attachment-file-title"></span>
+            <div class="attachment-preview-actions">
+                <button class="attachment-preview-button" id="attachment-file-copy"
+                    type="button" aria-label="Copy file contents" title="Copy">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <rect x="8" y="8" width="12" height="13" rx="2"></rect>
+                        <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"></path>
+                    </svg>
+                </button>
+                <button class="attachment-preview-button" id="attachment-file-download"
+                    type="button" aria-label="Download file" title="Download">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3"></path>
+                    </svg>
+                </button>
+                <button class="attachment-preview-button" id="attachment-file-share"
+                    type="button" aria-label="Share file" title="Share">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="18" cy="5" r="3"></circle>
+                        <circle cx="6" cy="12" r="3"></circle>
+                        <circle cx="18" cy="19" r="3"></circle>
+                        <path d="m8.7 10.5 6.6-4m-6.6 9 6.6 4"></path>
+                    </svg>
+                </button>
+                <button class="attachment-preview-button" id="attachment-file-close"
+                    type="button" aria-label="Close file preview" title="Close">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m6 6 12 12M18 6 6 18"></path>
+                    </svg>
+                </button>
+            </div>
+        </header>
+        <div class="attachment-code-view" id="attachment-code-view"></div>
+        <div class="attachment-file-scrollbar attachment-file-scrollbar-vertical chat-scrollbar"
+            id="attachment-file-scrollbar-vertical" role="scrollbar" tabindex="-1"
+            aria-label="File preview vertical scroll position" aria-controls="attachment-code-view"
+            aria-orientation="vertical" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0">
+            <div class="chat-scrollbar-thumb"></div>
+        </div>
+        <div class="attachment-file-scrollbar attachment-file-scrollbar-horizontal chat-scrollbar"
+            id="attachment-file-scrollbar-horizontal" role="scrollbar" tabindex="-1"
+            aria-label="File preview horizontal scroll position" aria-controls="attachment-code-view"
+            aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="1000" aria-valuenow="0">
+            <div class="chat-scrollbar-thumb"></div>
+        </div>
+    </aside>
     <script type="module" src="/js/chat.js"></script>
 </body>
 
