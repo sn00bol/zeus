@@ -176,9 +176,49 @@
                                 <form class="composer" id="chat-form">
                                     <div class="tool-picker-menu" id="tool-picker-menu" role="listbox"
                                         aria-label="Available tools" hidden></div>
-                                    <div class="selected-tools" id="selected-tools" hidden></div>
+                                    <div class="prompt-add-menu" id="prompt-add-menu" role="menu"
+                                        aria-label="Add to prompt" hidden>
+                                        <button class="prompt-add-option" id="add-files-option" type="button"
+                                            role="menuitem">
+                                            <img src="/icon/attach.png" width="16" height="16" alt="">
+                                            <span class="prompt-add-option-copy">
+                                                <span class="prompt-add-option-label">Attach images and files</span>
+                                                <span class="prompt-add-option-description">Choose files to add to your prompt</span>
+                                            </span>
+                                        </button>
+                                        <button class="prompt-add-option" type="button" role="menuitem">
+                                            <img src="/icon/picture.png" width="16" height="16" alt="">
+                                            <span class="prompt-add-option-copy">
+                                                <span class="prompt-add-option-label">Create image</span>
+                                                <span class="prompt-add-option-description">Generate an image from a description</span>
+                                            </span>
+                                        </button>
+                                        <button class="prompt-add-option" id="add-search-option" type="button"
+                                            role="menuitem">
+                                            <img src="/icon/search.png" width="16" height="16" alt="">
+                                            <span class="prompt-add-option-copy">
+                                                <span class="prompt-add-option-label">Search on the internet</span>
+                                                <span class="prompt-add-option-description">Find current information and sources on the web</span>
+                                            </span>
+                                        </button>
+                                        <button class="prompt-add-option" type="button" role="menuitem">
+                                            <img src="/icon/deep-research.png" width="16" height="16" alt="">
+                                            <span class="prompt-add-option-copy">
+                                                <span class="prompt-add-option-label">Deep research</span>
+                                                <span class="prompt-add-option-description">Explore a topic in depth across multiple sources</span>
+                                            </span>
+                                        </button>
+                                    </div>
+                                    <div class="prompt-attachments" id="prompt-attachments"
+                                        aria-label="Attached files"></div>
                                     <div class="prompt-input-wrap" id="prompt-input-wrap">
-                                        <textarea id="message-input" rows="1" placeholder="Use @ to select a tool, or type your message here…" spellcheck="false"
+                                        <button class="prompt-add-button" id="prompt-add-button" type="button"
+                                            aria-label="Add to prompt" title="Add to prompt" aria-expanded="false"
+                                            aria-controls="prompt-add-menu">
+                                            <img src="/icon/add.png" width="17" height="17" alt="">
+                                        </button>
+                                        <div class="selected-tools" id="selected-tools" hidden></div>
+                                        <textarea id="message-input" rows="1" placeholder="Ask something..." spellcheck="false"
                                             aria-label="Message" aria-controls="tool-picker-menu"
                                             aria-expanded="false" autocomplete="off"></textarea>
                                         <div class="prompt-scrollbar" id="prompt-scrollbar" role="scrollbar"
@@ -188,6 +228,9 @@
                                             <span class="prompt-scrollbar-thumb" id="prompt-scrollbar-thumb"></span>
                                         </div>
                                     </div>
+                                    <input id="prompt-files-input" type="file"
+                                        accept="image/*,.txt,.md,.markdown,.rst,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.htm,.css,.js,.mjs,.cjs,.ts,.tsx,.jsx,.py,.pyi,.java,.c,.h,.cc,.cpp,.hpp,.rs,.go,.rb,.php,.sh,.bash,.zsh,.sql,.ps1,.bat,.cmd,.diff,.patch,.ini,.conf,.env,.log,.ipynb,.mdx,.vue,.svelte,.astro,.kt,.kts,.swift,.dart,.scala,.sc,.pl,.pm,.lua,.r,.m,.mm,.tex,.adoc,.asciidoc,.lock,.tf,.hcl,.proto,.graphql,.gql,.sol,.ex,.exs,.erl,.hrl,.hs,.lhs,.elm,.clj,.cljs,.edn,.fs,.fsx,.cs,.csx,.vb,.nix,.fish,.make,.mk,.gitignore,.gitattributes,.editorconfig"
+                                        multiple hidden>
                                     <div class="composer-actions">
                                         <div class="model-picker" id="model-picker">
                                             <button class="model-picker-button" id="model-picker-button" type="button"

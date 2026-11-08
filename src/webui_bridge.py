@@ -178,9 +178,46 @@ async def _inference_request_from_body(body: dict[str, Any]) -> InferenceRequest
     for item in raw_messages:
         if not isinstance(item, dict):
             raise ValueError("Each message must be an object.")
+        raw_content = item.get("content", "")
+        provider_content: list[dict[str, Any]] | None = None
+        if isinstance(raw_content, list):
+            if not raw_content or len(raw_content) > 21:
+                raise ValueError("Message content must contain between 1 and 21 parts.")
+            provider_content = []
+            text_parts: list[str] = []
+            for part in raw_content:
+                if not isinstance(part, dict):
+                    raise ValueError("Message content parts must be objects.")
+                if part.get("type") == "text" and isinstance(part.get("text"), str):
+                    provider_content.append({"type": "text", "text": part["text"]})
+                    text_parts.append(part["text"])
+                elif part.get("type") == "image_url":
+                    image = part.get("image_url")
+                    url = image.get("url") if isinstance(image, dict) else None
+                    if not isinstance(url, str) or not re.fullmatch(
+                        r"data:image/[a-zA-Z0-9.+-]+;base64,"
+                        r"(?:[A-Za-z0-9+/]{4})*"
+                        r"(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{4})",
+                        url,
+                    ):
+                        raise ValueError("Image content must use a valid base64 data URL.")
+                    provider_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": url},
+                    })
+                else:
+                    raise ValueError("Message content contains an unsupported part.")
+            if not any(part["type"] == "image_url" for part in provider_content):
+                raise ValueError("Structured message content must include an image.")
+            content = "\n".join(text_parts)
+        elif isinstance(raw_content, str):
+            content = raw_content
+        else:
+            raise ValueError("Message content must be text or supported image content.")
         messages.append(Message(
             role=str(item.get("role", "user")),
-            content=str(item.get("content", "")),
+            content=content,
+            provider_content=provider_content,
         ))
 
     platform = str(body.get("platform") or "webui")

@@ -28,4 +28,3 @@ TODOS:
 - Add limit text on platform to prevent not fully display or send prompt too long, and platform have max token
 - Add supporting rendering for Telegram
 - Uprade import PDF/docx (cuz it broken)
-- Add support image/file,... (and no limits)

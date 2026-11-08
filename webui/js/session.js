@@ -57,6 +57,8 @@ export async function loadSessionHistory({
             const rendered = addMessage(message.role, message.content, {
                 thinking: message.thinking,
                 sources: Array.isArray(message.sources) ? message.sources : [],
+                tools: Array.isArray(message.tools) ? message.tools : [],
+                attachments: Array.isArray(message.attachments) ? message.attachments : [],
             }, messageContainer);
             if (message.role === 'assistant') {
                 renderStreamDetails(rendered.details, {

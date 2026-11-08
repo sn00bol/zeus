@@ -6,8 +6,16 @@ function parseEvent(event) {
     }
 }
 
-export async function startChatStream({ conversationId, message, think, tools = [], isTemporary = false, messages = [] }) {
-    const payload = { conversationId, message, tools, isTemporary, messages };
+export async function startChatStream({
+    conversationId,
+    message,
+    think,
+    tools = [],
+    attachments = [],
+    isTemporary = false,
+    messages = [],
+}) {
+    const payload = { conversationId, message, tools, attachments, isTemporary, messages };
     if (think !== undefined) payload.think = think;
     const response = await fetch('/api/chat', {
         method: 'POST',

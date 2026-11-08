@@ -117,6 +117,10 @@ test('temporary conversation IDs are never persisted without a client temporary 
         },
         bridgeSse: async (route, options) => {
             assert.equal(route, '/infer');
+            assert.deepEqual(
+                options.body.tools,
+                options.body.session.conversation_id === 'temp-123' ? [] : ['search'],
+            );
             assert.deepEqual(options.body.messages, [{
                 role: 'user',
                 content: options.body.session.conversation_id === 'temp-123'
@@ -156,6 +160,7 @@ test('temporary conversation IDs are never persisted without a client temporary 
                 body: JSON.stringify({
                     conversationId: 'conversation-123',
                     message: 'persistent prompt',
+                    tools: ['search'],
                 }),
             },
         );
@@ -163,6 +168,90 @@ test('temporary conversation IDs are never persisted without a client temporary 
         const persistentStream = await persistentResponse.json();
         await streamManager.streams.get(persistentStream.streamId).task;
         assert.deepEqual(appendedMessages.map(message => message.role), ['user', 'assistant']);
+        assert.deepEqual(appendedMessages[0].tools, ['search']);
+    } finally {
+        await new Promise((resolve, reject) => server.close(error => (
+            error ? reject(error) : resolve()
+        )));
+    }
+});
+
+test('chat attachments forward images and text files while rejecting unsupported files', async () => {
+    const savedMessages = [];
+    const streamManager = new StreamManager();
+    let inferenceMessages;
+    const server = createWebUiServer({
+        db: {
+            appendMessage: async message => savedMessages.push(message),
+            getMessages: async () => savedMessages.filter(message => message.role === 'user'),
+            getModelPreference: async () => null,
+            pool: { query: async () => ({ rows: [] }) },
+        },
+        bridgeSse: async (route, options) => {
+            inferenceMessages = options.body.messages;
+            return {
+                content: 'image answer',
+                model: 'vision-model',
+                provider: 'ollama',
+                prompt_tokens: 1,
+                completion_tokens: 1,
+            };
+        },
+        streamManager,
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    try {
+        const response = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'attachment-chat',
+                message: 'What is in this picture?',
+                attachments: [
+                    {
+                        kind: 'image',
+                        name: 'sample.png',
+                        type: 'image/png',
+                        data: 'data:image/png;base64,aW1n',
+                    },
+                    {
+                        kind: 'text',
+                        name: 'main.py',
+                        type: 'text/x-python',
+                        text: 'print("hello")',
+                    },
+                ],
+            }),
+        });
+        assert.equal(response.status, 202);
+        const { streamId } = await response.json();
+        await streamManager.streams.get(streamId).task;
+
+        assert.equal(savedMessages[0].attachments.length, 2);
+        assert.equal(inferenceMessages[0].content[0].type, 'text');
+        assert.match(inferenceMessages[0].content[0].text, /What is in this picture\?/);
+        assert.match(inferenceMessages[0].content[0].text, /print\("hello"\)/);
+        assert.deepEqual(inferenceMessages[0].content[1], {
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,aW1n' },
+        });
+
+        const rejected = await fetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conversationId: 'attachment-chat',
+                message: 'Read this',
+                attachments: [{
+                    kind: 'text',
+                    name: 'archive.zip',
+                    type: 'application/zip',
+                    text: 'not text',
+                }],
+            }),
+        });
+        assert.equal(rejected.status, 400);
+        assert.match((await rejected.json()).error, /not a supported text or code file/);
     } finally {
         await new Promise((resolve, reject) => server.close(error => (
             error ? reject(error) : resolve()

@@ -167,3 +167,59 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(router.request.platform, "webui")
         self.assertEqual(router.request.messages[0].content, "hello")
         self.assertEqual(router.request.extra["tools"], ["search"])
+
+    async def test_infer_preserves_image_content_for_vision_models(self) -> None:
+        class FakeRouter:
+            async def route(self, request: object) -> object:
+                self.request = request
+                return type("Result", (), {
+                    "content": "description",
+                    "thinking": "",
+                    "model": "vision-model",
+                    "provider": "ollama",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "context_length": None,
+                    "finish_reason": "stop",
+                })()
+
+        router = FakeRouter()
+        content = [
+            {"type": "text", "text": "Describe this image."},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64,aW1n"},
+            },
+        ]
+        with patch.object(webui_bridge, "_router", router):
+            response = await call_asgi(
+                webui_bridge.create_app(),
+                "POST",
+                "/infer",
+                body={"messages": [{"role": "user", "content": content}]},
+            )
+
+        self.assertEqual(response[0]["status"], 200)
+        self.assertEqual(router.request.messages[0].content, "Describe this image.")
+        self.assertEqual(router.request.messages[0].provider_content, content)
+
+    async def test_infer_rejects_non_data_image_urls(self) -> None:
+        response = await call_asgi(
+            webui_bridge.create_app(),
+            "POST",
+            "/infer",
+            body={
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe this."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "https://example.test/image.png"},
+                        },
+                    ],
+                }],
+            },
+        )
+        self.assertEqual(response[0]["status"], 400)
+        self.assertIn("base64 data URL", response_json(response)["error"])

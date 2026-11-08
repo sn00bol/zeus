@@ -66,6 +66,7 @@ class Message:
     """A single turn in a conversation (mirrors the OpenAI messages format)."""
     role: str           # "system" | "user" | "assistant"
     content: str
+    provider_content: list[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -723,7 +724,7 @@ class Router:
     def _chat_payload(
         provider: BaseProvider,
         model_id: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int | None,
         extra: dict[str, Any],
@@ -767,7 +768,7 @@ class Router:
     async def _call_backend(
         provider: BaseProvider,
         model_id: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int | None,
         stream: bool,
@@ -802,9 +803,38 @@ class Router:
                 options["temperature"] = temperature
             if max_tokens is not None:
                 options["num_predict"] = max_tokens
+            native_messages: list[dict[str, Any]] = []
+            for message in messages:
+                content = message["content"]
+                if not isinstance(content, list):
+                    native_messages.append(message)
+                    continue
+                text_parts = [
+                    part["text"] for part in content
+                    if isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ]
+                images = [
+                    part["image_url"]["url"].split(",", 1)[1]
+                    for part in content
+                    if isinstance(part, dict)
+                    and part.get("type") == "image_url"
+                    and isinstance(part.get("image_url"), dict)
+                    and isinstance(part["image_url"].get("url"), str)
+                    and part["image_url"]["url"].startswith("data:image/")
+                    and "," in part["image_url"]["url"]
+                ]
+                native_message: dict[str, Any] = {
+                    "role": message["role"],
+                    "content": "\n".join(text_parts),
+                }
+                if images:
+                    native_message["images"] = images
+                native_messages.append(native_message)
             native_payload: dict[str, Any] = {
                 "model": model_id,
-                "messages": messages,
+                "messages": native_messages,
                 "stream": False,
                 "options": options,
                 "think": think,
@@ -845,7 +875,7 @@ class Router:
     async def _stream_backend(
         provider: BaseProvider,
         model_id: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float,
         max_tokens: int | None,
         extra: dict[str, Any],

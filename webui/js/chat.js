@@ -36,6 +36,13 @@ const promptScrollThumb = document.getElementById('prompt-scrollbar-thumb');
 const sendButton = document.getElementById('send-button');
 const toolMenu = document.getElementById('tool-picker-menu');
 const selectedToolsElement = document.getElementById('selected-tools');
+const promptAttachmentsElement = document.getElementById('prompt-attachments');
+const composerActions = document.querySelector('.composer-actions');
+const addButton = document.getElementById('prompt-add-button');
+const addMenu = document.getElementById('prompt-add-menu');
+const addFilesOption = document.getElementById('add-files-option');
+const searchOption = document.getElementById('add-search-option');
+const filesInput = document.getElementById('prompt-files-input');
 const modelButton = document.getElementById('model-picker-button');
 const modelLabel = document.getElementById('model-picker-label');
 const modelMenu = document.getElementById('model-picker-menu');
@@ -45,6 +52,7 @@ const busySessions = new Set();
 const activeStreams = new Map();
 const sessionViews = new Map([[conversationId, messagesElement]]);
 const sessionDrafts = new Map();
+const sessionDraftAttachments = new Map();
 const sessionHistoryLoads = new Map();
 let switchSequence = 0;
 let modelChoices = [];
@@ -53,6 +61,7 @@ let runtimeModel = null;
 let settings = null;
 let availableTools = [];
 let selectedTools = [];
+let selectedAttachments = [];
 let activeToolOption = 0;
 let thinkingMode = localStorage.getItem('zeus.webui.thinking_mode') || 'auto'; // 'auto' | 'on' | 'off'
 let promptScrollDragging = false;
@@ -141,6 +150,8 @@ if (tempChatButton) {
             document.getElementById('welcome-subtitle').hidden = false;
             setEmptyChatLayout(true);
             input.value = '';
+            selectedAttachments = [];
+            renderSelectedAttachments();
             selectedTools = [];
             renderSelectedTools();
             closeToolMenu();
@@ -198,12 +209,14 @@ function setEmptyChatLayout(empty) {
         welcomeStage.append(composerWrap, chatFooter);
         chatDock.hidden = true;
         chatElement.classList.add('welcome-state');
+        requestAnimationFrame(resizePrompt);
         return;
     }
     tempChatButton.hidden = !isTempChat;
     chatDock.append(composerWrap, chatFooter);
     chatDock.hidden = false;
     chatElement.classList.remove('welcome-state');
+    requestAnimationFrame(resizePrompt);
 }
 
 
@@ -356,7 +369,13 @@ function removeLeadingSourceSection(content) {
 function addMessage(
     role,
     content,
-    { error = false, thinking: thinkingText = '', sources = [] } = {},
+    {
+        error = false,
+        thinking: thinkingText = '',
+        sources = [],
+        tools = [],
+        attachments = [],
+    } = {},
     container = messagesElement,
 ) {
     const item = document.createElement('article');
@@ -376,6 +395,23 @@ function addMessage(
     } else {
         contentElement.textContent = content;
     }
+    if (role === 'user' && Array.isArray(tools) && tools.includes('search')) {
+        const searchIndicator = document.createElement('span');
+        searchIndicator.className = 'message-search-tool';
+        const icon = document.createElement('img');
+        icon.src = '/icon/search.png';
+        icon.alt = '';
+        icon.width = 14;
+        icon.height = 14;
+        const label = document.createElement('span');
+        label.textContent = 'Search on the Internet';
+        searchIndicator.append(icon, label);
+        contentElement.insertBefore(searchIndicator, contentElement.firstChild);
+        contentElement.insertBefore(
+            document.createTextNode(' '),
+            searchIndicator.nextSibling,
+        );
+    }
     const thinking = document.createElement('div');
     thinking.className = 'message-thinking';
     thinking.hidden = true;
@@ -388,6 +424,12 @@ function addMessage(
     }
     const details = document.createElement('div');
     details.className = 'stream-details';
+    if (role === 'user' && attachments.length) {
+        const attachmentList = document.createElement('div');
+        attachmentList.className = 'message-attachments';
+        renderAttachments(attachmentList, attachments);
+        item.append(attachmentList);
+    }
     body.append(thinking, contentElement, details);
     item.append(body);
     container.append(item);
@@ -526,18 +568,176 @@ settings = initializeSettings({
     loadModels,
     onSearchSettingChange: enabled => {
         if (!enabled) selectedTools = selectedTools.filter(name => name !== 'search');
+        searchOption.hidden = !enabled;
         renderSelectedTools();
         renderToolMenu();
     },
 });
+searchOption.hidden = !settings.isSearchEnabled();
 
 function updateSendButton() {
-    const hasInput = Boolean(input.value.trim());
+    const hasInput = Boolean(input.value.trim() || selectedAttachments.length);
     form.classList.toggle('has-input', hasInput);
+    form.classList.toggle('has-attachments', selectedAttachments.length > 0);
     sendButton.disabled = busySessions.has(conversationId)
         || messagesElement.dataset.historyLoaded !== 'true'
         || !hasInput;
 }
+
+const textFileExtensions = new Set([
+    'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml',
+    'toml', 'xml', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
+    'py', 'pyi', 'java', 'c', 'h', 'cc', 'cpp', 'hpp', 'rs', 'go', 'rb', 'php',
+    'sh', 'bash', 'zsh', 'sql', 'ps1', 'bat', 'cmd', 'diff', 'patch', 'ini',
+    'conf', 'env', 'log', 'ipynb', 'mdx', 'vue', 'svelte', 'astro', 'kt', 'kts',
+    'swift', 'dart', 'scala', 'sc', 'pl', 'pm', 'lua', 'r', 'm', 'mm', 'tex',
+    'adoc', 'asciidoc', 'lock', 'tf', 'hcl', 'proto', 'graphql', 'gql', 'sol',
+    'ex', 'exs', 'erl', 'hrl', 'hs', 'lhs', 'elm', 'clj', 'cljs', 'edn', 'fs',
+    'fsx', 'cs', 'csx', 'vb', 'nix', 'fish', 'make', 'mk', 'gitignore',
+    'gitattributes', 'editorconfig',
+]);
+const imageMimeByExtension = {
+    '3fr': 'image/x-3fr', apng: 'image/apng', arw: 'image/x-sony-arw',
+    avif: 'image/avif', bmp: 'image/bmp', cr2: 'image/x-canon-cr2',
+    cr3: 'image/x-canon-cr3', cur: 'image/x-icon', dib: 'image/bmp',
+    dng: 'image/x-adobe-dng', erf: 'image/x-epson-erf', exr: 'image/aces',
+    gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', icns: 'image/icns',
+    ico: 'image/x-icon', j2c: 'image/jp2', j2k: 'image/jp2', jp2: 'image/jp2',
+    jpe: 'image/jpeg', jpeg: 'image/jpeg', jpg: 'image/jpeg', jpf: 'image/jpx',
+    jng: 'image/x-jng', jxl: 'image/jxl', kdc: 'image/x-kodak-kdc',
+    mng: 'image/x-mng', mos: 'image/x-leaf-mos', mrw: 'image/x-minolta-mrw',
+    nef: 'image/x-nikon-nef', nrw: 'image/x-nikon-nrw', orf: 'image/x-olympus-orf',
+    pbm: 'image/x-portable-bitmap', pcx: 'image/x-pcx', pef: 'image/x-pentax-pef',
+    pgm: 'image/x-portable-graymap', png: 'image/png', ppm: 'image/x-portable-pixmap',
+    psd: 'image/vnd.adobe.photoshop', raf: 'image/x-fuji-raf', raw: 'image/x-raw',
+    rw2: 'image/x-panasonic-rw2', sr2: 'image/x-sony-sr2', srf: 'image/x-sony-srf',
+    svg: 'image/svg+xml', tga: 'image/x-tga', tif: 'image/tiff',
+    tiff: 'image/tiff', webp: 'image/webp', xbm: 'image/x-xbitmap',
+    xcf: 'image/x-xcf', xpm: 'image/x-xpixmap',
+};
+
+function getFileExtension(name) {
+    const match = String(name).toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match ? match[1] : '';
+}
+
+function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.addEventListener('load', () => {
+            if (typeof reader.result !== 'string') {
+                reject(new Error(`Could not read ${file.name} as an image.`));
+                return;
+            }
+            resolve(reader.result);
+        });
+        reader.addEventListener('error', () => reject(reader.error || new Error(`Could not read ${file.name}.`)));
+        reader.readAsDataURL(file);
+    });
+}
+
+async function prepareAttachment(file) {
+    const extension = getFileExtension(file.name);
+    const type = file.type.startsWith('image/')
+        ? file.type
+        : imageMimeByExtension[extension] || file.type || '';
+    if (type.startsWith('image/')) {
+        if (!file.size) throw new Error(`${file.name} is an empty image.`);
+        return {
+            id: crypto.randomUUID(),
+            kind: 'image',
+            name: file.name,
+            type,
+            data: await readFileAsDataUrl(file),
+        };
+    }
+    if (!textFileExtensions.has(extension)) {
+        throw new Error(`${file.name} is not a supported image, code, or text file.`);
+    }
+    const bytes = await file.arrayBuffer();
+    let text;
+    try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (error) {
+        if (!(error instanceof TypeError)) throw error;
+        throw new Error(`${file.name} is not a readable UTF-8 text file.`);
+    }
+    if (text.includes('\0')) {
+        throw new Error(`${file.name} is binary and cannot be attached as text.`);
+    }
+    return { id: crypto.randomUUID(), kind: 'text', name: file.name, type, text };
+}
+
+function renderAttachments(container, attachments, { removable = false } = {}) {
+    container.replaceChildren();
+    for (const attachment of attachments) {
+        const item = document.createElement('div');
+        item.className = removable ? 'prompt-attachment' : 'message-attachment';
+        if (attachment.kind === 'image' && attachment.data) {
+            const image = document.createElement('img');
+            image.className = removable ? 'prompt-attachment-image' : 'message-attachment-image';
+            image.src = attachment.data;
+            image.alt = attachment.name;
+            image.addEventListener('error', () => {
+                image.replaceWith(document.createTextNode(attachment.name));
+            }, { once: true });
+            item.append(image);
+        } else {
+            item.classList.add(removable ? 'prompt-attachment-file-item' : 'message-attachment-file-item');
+            const fileIcon = document.createElement('img');
+            fileIcon.className = 'attachment-file-icon';
+            fileIcon.src = '/icon/file.png';
+            fileIcon.alt = '';
+            const fileLabel = document.createElement('span');
+            fileLabel.className = 'attachment-file-name';
+            fileLabel.textContent = attachment.name;
+            item.append(fileIcon, fileLabel);
+        }
+        if (removable) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'prompt-attachment-remove';
+            remove.setAttribute('aria-label', `Remove ${attachment.name}`);
+            remove.title = `Remove ${attachment.name}`;
+            remove.textContent = '×';
+            remove.addEventListener('click', () => {
+                selectedAttachments = selectedAttachments.filter(item => item.id !== attachment.id);
+                renderSelectedAttachments();
+                resizePrompt();
+                updateSendButton();
+            });
+            item.append(remove);
+        } else {
+            item.title = attachment.name;
+        }
+        container.append(item);
+    }
+}
+
+function renderSelectedAttachments() {
+    const hasAttachments = selectedAttachments.length > 0;
+    renderAttachments(promptAttachmentsElement, selectedAttachments, { removable: true });
+    form.classList.toggle('has-attachments', hasAttachments);
+    if (hasAttachments) composerActions.prepend(addButton);
+    else promptInputWrap.prepend(addButton);
+}
+
+filesInput.addEventListener('change', async () => {
+    const files = Array.from(filesInput.files || []);
+    filesInput.value = '';
+    const errors = [];
+    for (const file of files) {
+        try {
+            selectedAttachments.push(await prepareAttachment(file));
+        } catch (error) {
+            errors.push(error.message);
+        }
+    }
+    renderSelectedAttachments();
+    resizePrompt();
+    updateSendButton();
+    if (errors.length) window.alert(errors.join('\n'));
+});
 
 function getToolMention() {
     const cursor = input.selectionStart;
@@ -554,7 +754,7 @@ function visibleTools() {
     const mention = getToolMention();
     if (!mention) return [];
     return availableTools.filter(tool => (
-        (tool.name !== 'search' || settings?.isSearchEnabled() !== false)
+        tool.name !== 'search'
         && (
             tool.name.includes(mention.query)
             || tool.label.toLowerCase().includes(mention.query)
@@ -606,6 +806,20 @@ function renderSelectedTools() {
     selectedToolsElement.replaceChildren();
     for (const toolName of selectedTools) {
         const tool = availableTools.find(item => item.name === toolName);
+        if (toolName === 'search') {
+            const token = document.createElement('span');
+            token.className = 'selected-tool selected-search-tool';
+            const icon = document.createElement('img');
+            icon.src = '/icon/search.png';
+            icon.alt = '';
+            icon.width = 14;
+            icon.height = 14;
+            const label = document.createElement('span');
+            label.textContent = 'Search on the Internet';
+            token.append(icon, label);
+            selectedToolsElement.append(token);
+            continue;
+        }
         if (!tool) continue;
         const chip = document.createElement('span');
         chip.className = 'selected-tool';
@@ -624,10 +838,43 @@ function renderSelectedTools() {
         chip.append(label, remove);
         selectedToolsElement.append(chip);
     }
-    const hasTools = selectedTools.length > 0;
-    selectedToolsElement.hidden = !hasTools;
-    form.classList.toggle('has-tools', hasTools);
+    selectedToolsElement.hidden = selectedTools.length === 0;
+    form.classList.toggle('has-tools', selectedTools.some(name => name !== 'search'));
 }
+
+function closeAddMenu() {
+    addMenu.hidden = true;
+    addButton.setAttribute('aria-expanded', 'false');
+}
+
+function selectSearchTool() {
+    if (settings?.isSearchEnabled() === false) return;
+    if (!selectedTools.includes('search')) selectedTools.push('search');
+    renderSelectedTools();
+    closeAddMenu();
+    input.focus();
+}
+
+addButton.addEventListener('click', () => {
+    const shouldOpen = addMenu.hidden;
+    closeToolMenu();
+    addMenu.hidden = !shouldOpen;
+    addButton.setAttribute('aria-expanded', String(shouldOpen));
+});
+
+addFilesOption.addEventListener('click', () => {
+    closeAddMenu();
+    filesInput.click();
+});
+
+searchOption.addEventListener('click', selectSearchTool);
+
+document.addEventListener('click', event => {
+    if (!promptInputWrap.contains(event.target)
+        && !addButton.contains(event.target)
+        && !addMenu.contains(event.target)) closeAddMenu();
+    if (!form.contains(event.target)) closeToolMenu();
+});
 
 function selectTool(tool) {
     const mention = getToolMention();
@@ -650,9 +897,10 @@ async function loadTools() {
 
 function resizePrompt() {
     input.style.height = 'auto';
-    const multiline = input.scrollHeight > 48;
+    const height = input.value ? input.scrollHeight : 32;
+    const multiline = height > 48;
     form.classList.toggle('multiline', multiline);
-    input.style.height = `${Math.min(input.scrollHeight, 170)}px`;
+    input.style.height = `${Math.min(height, 170)}px`;
     updatePromptScrollBar();
 }
 
@@ -733,6 +981,17 @@ input.addEventListener('input', () => {
 });
 
 input.addEventListener('keydown', event => {
+    if (
+        selectedTools.includes('search')
+        && (event.key === 'Backspace' || event.key === 'Delete')
+        && input.selectionStart === 0
+        && input.selectionEnd === 0
+    ) {
+        event.preventDefault();
+        selectedTools = selectedTools.filter(name => name !== 'search');
+        renderSelectedTools();
+        return;
+    }
     const tools = visibleTools();
     if (!toolMenu.hidden && tools.length) {
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -753,6 +1012,10 @@ input.addEventListener('keydown', event => {
             return;
         }
     }
+    if (event.key === 'Escape' && !addMenu.hidden) {
+        closeAddMenu();
+        return;
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         form.requestSubmit();
@@ -762,11 +1025,13 @@ input.addEventListener('keydown', event => {
 form.addEventListener('submit', async event => {
     event.preventDefault();
     const messageText = input.value.trim();
-    if (!messageText || busySessions.has(conversationId)
+    if ((!messageText && !selectedAttachments.length) || busySessions.has(conversationId)
         || messagesElement.dataset.historyLoaded !== 'true') return;
+    const requestText = messageText || 'Please analyze the attached file(s).';
     const sessionId = conversationId;
     const messageContainer = messagesElement;
     const tools = [...selectedTools];
+    const attachments = selectedAttachments.map(({ id, ...attachment }) => attachment);
     const temporaryMessages = isTempChat ? tempMessagesList : null;
 
     busySessions.add(sessionId);
@@ -774,13 +1039,15 @@ form.addEventListener('submit', async event => {
     updateSendButton();
     setEmptyChatLayout(false);
     userPinnedToBottom = true;
-    addMessage('user', messageText);
+    addMessage('user', messageText, { tools, attachments });
     if (temporaryMessages) {
-        temporaryMessages.push({ role: 'user', content: messageText });
+        temporaryMessages.push({ role: 'user', content: requestText, tools, attachments });
     }
     chatActions.hidden = false;
     if (chatMoreButton) chatMoreButton.hidden = Boolean(temporaryMessages);
     input.value = '';
+    selectedAttachments = [];
+    renderSelectedAttachments();
     selectedTools = [];
     renderSelectedTools();
     closeToolMenu();
@@ -792,9 +1059,10 @@ form.addEventListener('submit', async event => {
     try {
         const streamId = await startChatStream({
             conversationId: sessionId,
-            message: messageText,
+            message: requestText,
             think: getThinkParam(),
             tools,
+            attachments,
             isTemporary: Boolean(temporaryMessages),
             messages: temporaryMessages || [],
         });
@@ -891,6 +1159,7 @@ async function switchSession(sessionId) {
     if (isTempChat) setTempChatMode(false);
     const sequence = ++switchSequence;
     sessionDrafts.set(conversationId, input.value);
+    sessionDraftAttachments.set(conversationId, selectedAttachments);
     conversationId = sessionId;
     sidebar.setSessionId(sessionId);
     let nextMessages = sessionViews.get(sessionId);
@@ -917,6 +1186,8 @@ async function switchSession(sessionId) {
     }
 
     input.value = sessionDrafts.get(sessionId) || '';
+    selectedAttachments = sessionDraftAttachments.get(sessionId) || [];
+    renderSelectedAttachments();
     selectedTools = [];
     renderSelectedTools();
     closeToolMenu();

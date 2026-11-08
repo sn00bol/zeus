@@ -15,6 +15,18 @@ const { createTitleGenerationService } = require('./js/title');
 const PLATFORM = 'webui';
 const DEFAULT_CONVERSATION_TITLE = 'New conversation';
 const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64 MB
+const TEXT_ATTACHMENT_EXTENSIONS = new Set([
+    'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml',
+    'toml', 'xml', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
+    'py', 'pyi', 'java', 'c', 'h', 'cc', 'cpp', 'hpp', 'rs', 'go', 'rb', 'php',
+    'sh', 'bash', 'zsh', 'sql', 'ps1', 'bat', 'cmd', 'diff', 'patch', 'ini',
+    'conf', 'env', 'log', 'ipynb', 'mdx', 'vue', 'svelte', 'astro', 'kt', 'kts',
+    'swift', 'dart', 'scala', 'sc', 'pl', 'pm', 'lua', 'r', 'm', 'mm', 'tex',
+    'adoc', 'asciidoc', 'lock', 'tf', 'hcl', 'proto', 'graphql', 'gql', 'sol',
+    'ex', 'exs', 'erl', 'hrl', 'hs', 'lhs', 'elm', 'clj', 'cljs', 'edn', 'fs',
+    'fsx', 'cs', 'csx', 'vb', 'nix', 'fish', 'make', 'mk', 'gitignore',
+    'gitattributes', 'editorconfig',
+]);
 const AVAILABLE_TOOLS = Object.freeze([
     {
         name: 'search',
@@ -71,6 +83,60 @@ function validateStreamId(value) {
         throw new HttpError(400, 'Invalid stream ID.');
     }
     return value;
+}
+
+function validateAttachments(value) {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 20) {
+        throw new HttpError(400, 'attachments must be an array of at most 20 files.');
+    }
+    return value.map((attachment, index) => {
+        if (!attachment || typeof attachment !== 'object' || Array.isArray(attachment)
+            || typeof attachment.name !== 'string' || !attachment.name.trim()
+            || attachment.name.length > 255 || /[\\/\u0000-\u001f]/.test(attachment.name)) {
+            throw new HttpError(400, `Attachment ${index + 1} has an invalid filename.`);
+        }
+        const name = attachment.name.trim();
+        const type = typeof attachment.type === 'string' ? attachment.type.toLowerCase() : '';
+        if (attachment.kind === 'image') {
+            if (!/^image\/[a-z0-9.+-]+$/.test(type)
+                || typeof attachment.data !== 'string') {
+                throw new HttpError(400, `Attachment "${name}" is not a valid image.`);
+            }
+            const prefix = `data:${type};base64,`;
+            if (!attachment.data.startsWith(prefix)) {
+                throw new HttpError(400, `Attachment "${name}" has invalid image data.`);
+            }
+            const encoded = attachment.data.slice(prefix.length);
+            if (!encoded || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+                throw new HttpError(400, `Attachment "${name}" has invalid image data.`);
+            }
+            return { kind: 'image', name, type, data: attachment.data };
+        }
+        const extension = name.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+        if (attachment.kind !== 'text' || !TEXT_ATTACHMENT_EXTENSIONS.has(extension)
+            || typeof attachment.text !== 'string' || attachment.text.includes('\0')) {
+            throw new HttpError(400, `Attachment "${name}" is not a supported text or code file.`);
+        }
+        return { kind: 'text', name, type, text: attachment.text };
+    });
+}
+
+function providerMessageContent(content, attachments = []) {
+    const textAttachments = attachments
+        .filter(attachment => attachment.kind === 'text')
+        .map(attachment => `\n\n--- Attached file: ${attachment.name} ---\n${attachment.text}\n--- End of ${attachment.name} ---`)
+        .join('');
+    const text = `${content}${textAttachments}`;
+    const images = attachments.filter(attachment => attachment.kind === 'image');
+    if (!images.length) return text;
+    return [
+        { type: 'text', text },
+        ...images.map(attachment => ({
+            type: 'image_url',
+            image_url: { url: attachment.data },
+        })),
+    ];
 }
 
 async function readJson(request) {
@@ -640,8 +706,10 @@ function createWebUiServer({
             if (request.method === 'POST' && url.pathname === '/api/chat') {
                 const body = await readJson(request);
                 const conversationId = validateConversationId(body.conversationId);
-                if (typeof body.message !== 'string' || !body.message.trim()) {
-                    throw new HttpError(400, 'message must not be empty.');
+                const attachments = validateAttachments(body.attachments);
+                if (typeof body.message !== 'string'
+                    || (!body.message.trim() && !attachments.length)) {
+                    throw new HttpError(400, 'message or at least one attachment is required.');
                 }
                 const message = body.message.trim();
                 const selectedTools = body.tools === undefined ? [] : body.tools;
@@ -660,9 +728,15 @@ function createWebUiServer({
                 let titlePrompt = null;
                 if (isTemporary) {
                     if (Array.isArray(body.messages) && body.messages.length > 0) {
-                        history = body.messages.filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string');
+                        history = body.messages
+                            .filter(m => m && (m.role === 'user' || m.role === 'assistant')
+                                && typeof m.content === 'string')
+                            .map(item => ({
+                                ...item,
+                                attachments: validateAttachments(item.attachments),
+                            }));
                     } else {
-                        history = [{ role: 'user', content: message }];
+                        history = [{ role: 'user', content: message, attachments }];
                     }
                 } else {
                     await db.appendMessage({
@@ -670,7 +744,9 @@ function createWebUiServer({
                         conversation_id: conversationId,
                         message_id: randomUUID(),
                         role: 'user',
-                        content: message,
+                        content: message || 'Please analyze the attached file(s).',
+                        tools: selectedTools,
+                        attachments,
                         user_id: userId,
                         timestamp: new Date().toISOString(),
                     });
@@ -708,6 +784,20 @@ function createWebUiServer({
                         limit: 100,
                     });
                 }
+                const latestUserMessage = [...history].reverse()
+                    .find(item => item.role === 'user');
+                if (latestUserMessage) {
+                    latestUserMessage.attachments = attachments;
+                    if (!latestUserMessage.content) {
+                        latestUserMessage.content = 'Please analyze the attached file(s).';
+                    }
+                }
+                const providerMessages = history.map(({ role, content, attachments: messageAttachments }) => ({
+                    role,
+                    content: role === 'user'
+                        ? providerMessageContent(content, validateAttachments(messageAttachments))
+                        : content,
+                }));
                 const preference = await db.getModelPreference(modelScope(conversationId));
                 const streamId = streamManager.start(async publish => {
                     publish('ui_control', { state: 'thinking' });
@@ -728,7 +818,7 @@ function createWebUiServer({
                                     conversation_id: conversationId,
                                     user_id: userId,
                                 },
-                                messages: history.map(({ role, content }) => ({ role, content })),
+                                messages: providerMessages,
                             },
                             onEvent(type, data) {
                                 if (type === 'thinking' && data.text) {

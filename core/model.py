@@ -109,6 +109,7 @@ def _memory_reference_message(
 class _MessageLike(Protocol):
     role: str
     content: str
+    provider_content: list[dict[str, Any]] | None
 
 
 class _InferenceRequestLike(Protocol):
@@ -143,7 +144,7 @@ class ModelContext:
     provider: BaseProvider
     model_name: str
     api_token: str | None = field(default=None, repr=False)
-    messages: list[dict[str, str]] = field(default_factory=list)
+    messages: list[dict[str, Any]] = field(default_factory=list)
     temperature: float = 0.7
     max_tokens: int | None = None
     session: Session | None = None
@@ -412,9 +413,24 @@ class ModelManager:
         self._last_context_length = (
             selected_model.limits.context_length if selected_model else None
         )
+        has_images = any(
+            getattr(message, "provider_content", None) for message in request.messages
+        )
+        if has_images and selected_model is not None and not any(
+            modality.value == "image" for modality in selected_model.modalities
+        ):
+            raise ValueError(
+                f"The selected model '{model_name}' does not support image inputs. "
+                "Choose a vision-capable model to use image attachments."
+            )
 
         built_messages = [
-            {"role": message.role, "content": message.content}
+            {
+                "role": message.role,
+                "content": (
+                    getattr(message, "provider_content", None) or message.content
+                ),
+            }
             for message in request.messages
         ]
         history_context: list[str] = []

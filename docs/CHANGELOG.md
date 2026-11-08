@@ -3,7 +3,8 @@
 ## v1.0.0 - 11.31.2026
 Release note:
 
-This version currently work perfectly on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb" and always required WebUI as default
+1. This version currently work perfectly on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb" and always required WebUI as default
+2. This version **HIGHLY** supporting for Ollama Provider (cuz it my main), if you using LMStudio or llama.cpp you could face bug and glitch or not fully feature for your provider
 
 What changed:
 - Add ZEUS WebUI with basic task and add image, file
