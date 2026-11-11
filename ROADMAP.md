@@ -24,7 +24,8 @@ src/
 Database: PostgresSQL
 
 TODOS:
-- Add AI Agents sandbox enviroments to test running python code, testing, debug,...
+- Refactor entirely platform selection and remove 'PLATFORM' in `.env`, fix HTTP bugs
+- Unify websocket manager
+- Allow to use search engine on platform
 - Add limit text on platform to prevent not fully display or send prompt too long, and platform have max token
 - Add supporting rendering for Telegram
-- Add duckduckgo

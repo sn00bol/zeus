@@ -1,4 +1,4 @@
-const { createChatThread, respondInChatThread } = require('../utils/chatThreads');
+const { createChatThread, respondInChatThread } = require('../Adapter').chatThreads;
 
 module.exports = {
     name: 'new',

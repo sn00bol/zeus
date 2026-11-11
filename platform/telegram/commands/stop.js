@@ -1,4 +1,4 @@
-const { requestJson } = require('../utils/agent/agentBridge');
+const { requestJson } = require('../Adapter').bridge;
 
 module.exports = {
     name: 'stop',
@@ -11,7 +11,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'stop', platform: process.env.PLATFORM || 'telegram' },
+            body: { action: 'stop', platform: 'telegram' },
         });
         await ctx.reply('Safe shutdown requested. The Telegram bot and AI bridge will stop.');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

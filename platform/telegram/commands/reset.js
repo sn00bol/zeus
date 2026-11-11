@@ -1,4 +1,4 @@
-const { resetConversation } = require('../../shared/utils/sessionCommands');
+const { resetConversation } = require('../CommandHandler').sessionCommands;
 
 module.exports = {
     name: 'reset',

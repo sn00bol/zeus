@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import json
+import tempfile
 import unittest
 from contextlib import redirect_stdout
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import setup
 
@@ -15,6 +17,37 @@ class _TTYStringIO(io.StringIO):
 
 
 class SetupSelectionTests(unittest.TestCase):
+    def test_update_env_removes_legacy_platform_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            env_path = Path(temporary_directory) / ".env"
+            env_path.write_text("PLATFORM=webui,discord\nDB_PASSWORD=secret\n", encoding="utf-8")
+
+            setup.update_env(env_path, {"DB_PASSWORD": "updated"}, remove_keys={"PLATFORM"})
+
+            contents = env_path.read_text(encoding="utf-8")
+            self.assertNotIn("PLATFORM=", contents)
+            self.assertIn("DB_PASSWORD=updated", contents)
+
+    def test_platform_selection_is_persisted_to_database(self) -> None:
+        connection = AsyncMock()
+        config = {
+            "DB_HOST": "127.0.0.1",
+            "DB_PORT": "5432",
+            "DB_NAME": "zeus",
+            "DB_USER": "zeus",
+            "DB_PASSWORD": "test-password",
+        }
+        with patch("asyncpg.connect", new=AsyncMock(return_value=connection)) as connect:
+            setup.save_platform_settings(setup.ROOT, "webui,telegram", config)
+
+        connect.assert_awaited_once()
+        connection.execute.assert_awaited_once()
+        self.assertEqual(
+            connection.executemany.await_args.args[1],
+            [("webui", True), ("discord", False), ("telegram", True)],
+        )
+        connection.close.assert_awaited_once()
+
     def test_arrow_keys_move_the_interactive_selection(self) -> None:
         output = _TTYStringIO()
         options = [("discord", "Discord"), ("telegram", "Telegram")]

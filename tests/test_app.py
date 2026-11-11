@@ -80,24 +80,42 @@ class ManagedDatabaseTests(unittest.TestCase):
         self.assertEqual(environment["SEARXNG_URL"], "https://search.example.test")
 
     def test_selected_platforms_always_include_webui_and_allow_both_bots(self) -> None:
-        self.assertEqual(app._selected_platforms(""), ("webui",))
-        self.assertEqual(app._selected_platforms("discord"), ("webui", "discord"))
+        self.assertEqual(app._selected_platforms({"webui": True}), ("webui",))
         self.assertEqual(
-            app._selected_platforms("webui,telegram"),
+            app._selected_platforms({"webui": True, "telegram": True}),
             ("webui", "telegram"),
         )
         self.assertEqual(
-            app._selected_platforms("telegram,webui,discord,telegram"),
+            app._selected_platforms({
+                "webui": True,
+                "discord": True,
+                "telegram": True,
+            }),
             ("webui", "discord", "telegram"),
         )
+        with self.assertRaisesRegex(RuntimeError, "must be enabled"):
+            app._selected_platforms({"webui": False})
 
     def test_control_poll_returns_action_and_target_platform(self) -> None:
         response = MagicMock()
         response.status = 200
         response.read.return_value = b'{"action":"restart","platform":"telegram"}'
-        with patch("app.urlopen") as urlopen:
+        with (
+            patch.dict("os.environ", {"BRIDGE_TOKEN": "test-bridge-token"}),
+            patch("app.urlopen") as urlopen,
+        ):
             urlopen.return_value.__enter__.return_value = response
             self.assertEqual(app._poll_control(5000), ("restart", "telegram"))
+        request = urlopen.call_args.args[0]
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer test-bridge-token",
+        )
+
+    def test_control_poll_requires_bridge_token(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "BRIDGE_TOKEN is required"):
+                app._poll_control(5000)
 
     def test_run_platforms_starts_one_bridge_and_each_bot_with_webui(self) -> None:
         process = MagicMock()
@@ -135,14 +153,29 @@ class ManagedDatabaseTests(unittest.TestCase):
                 str(app.ROOT / "platform" / "telegram" / "index.js"),
             ],
         )
-        self.assertEqual(
-            [call.kwargs["env"]["PLATFORM"] for call in popen.call_args_list[1:]],
-            ["discord", "telegram"],
-        )
+        self.assertTrue(all("PLATFORM" not in call.kwargs["env"] for call in popen.call_args_list))
         self.assertNotEqual(
             popen.call_args_list[1].kwargs["env"]["HEALTHCHECK_PORT"],
             popen.call_args_list[2].kwargs["env"]["HEALTHCHECK_PORT"],
         )
+
+    def test_discord_can_start_without_a_message_command_prefix(self) -> None:
+        process = MagicMock()
+        process.poll.return_value = None
+        environment = {
+            "ZEUS_MANAGED_DATABASE": "true",
+            "DISCORD_BOT_API_KEY": "discord-token",
+            "DB_PASSWORD": "test-password",
+        }
+        with (
+            patch.dict("os.environ", environment, clear=True),
+            patch("app.shutil.which", return_value="node"),
+            patch("app.subprocess.Popen", return_value=process),
+            patch("app._wait_for_bridge"),
+            patch("app._poll_control", side_effect=KeyboardInterrupt),
+            patch("app._stop_process"),
+        ):
+            self.assertEqual(app.run_platform(name="discord"), 0)
 
     def test_restart_control_restarts_only_the_requested_bot(self) -> None:
         process = MagicMock()
@@ -220,10 +253,11 @@ class ManagedDatabaseTests(unittest.TestCase):
             patch.object(app, "ROOT", Path(temporary_directory)),
             patch.dict(
                 "os.environ",
-                {"ZEUS_MANAGED_DATABASE": "true", "PLATFORM": "telegram"},
+                {"ZEUS_MANAGED_DATABASE": "true", "DB_PASSWORD": "test-password"},
                 clear=True,
             ),
             patch("sys.argv", ["app.py"]),
+            patch.object(app, "_load_selected_platforms", return_value=("webui", "telegram")),
             patch.object(app, "run_platforms", return_value=0) as run_platforms,
         ):
             self.assertEqual(app.main(), 0)
@@ -232,6 +266,7 @@ class ManagedDatabaseTests(unittest.TestCase):
             names=("telegram",),
             record_logs=False,
             with_webui=True,
+            services_started=True,
         )
 
     def test_webui_is_the_default_platform(self) -> None:
@@ -240,15 +275,16 @@ class ManagedDatabaseTests(unittest.TestCase):
             patch.object(app, "ROOT", Path(temporary_directory)),
             patch.dict(
                 "os.environ",
-                {"ZEUS_MANAGED_DATABASE": "true", "PLATFORM": "webui"},
+                {"ZEUS_MANAGED_DATABASE": "true", "DB_PASSWORD": "test-password"},
                 clear=True,
             ),
             patch("sys.argv", ["app.py"]),
+            patch.object(app, "_load_selected_platforms", return_value=("webui",)),
             patch.object(app, "run_webui", return_value=0) as run_webui,
         ):
             self.assertEqual(app.main(), 0)
 
-        run_webui.assert_called_once_with()
+        run_webui.assert_called_once_with(services_started=True)
 
 
 if __name__ == "__main__":

@@ -2,23 +2,30 @@
   <strong>ZEUS Platform notes</strong>
 </p>
 
-If you're planning to add commands, develop features, or debug the bot, running it directly with Node.js is recommended
+If you're planning to add commands, develop features, or debug a bot, run its
+platform entrypoint directly with Node.js.
+
+Discord and Telegram each keep their runtime in their platform folder. Their
+command dispatch, database startup, slash registration, and platform-specific
+command helpers are consolidated in `CommandHandler.js`; AI, bridge,
+conversation, and chat-thread helpers are consolidated in `Adapter.js`.
+Platform-specific code must remain local to its platform; do not add a shared
+`core/platform` layer. The only nested folder in either platform is `commands`.
 
 The current `compose.yaml` runs PostgreSQL only. Bot restarts are handled by
-the host supervisor and do not build or pull an application image.
 
-Run the selected platform with the same scripts:
+Run the database-configured platform selection with:
 ```
-npm start      # Start the platform configured in .env
+npm start      # Start the WebUI and bot platforms enabled in PostgreSQL
 
-npm run dev    # Restart on file changes
+npm run dev    # Restart the supervisor when platform JavaScript files change
 
 npm test       # Run the test suite
 ```
 
 Platform commands:
 ```bash
-npm run register-commands  # Uses PLATFORM from .env to sync the command menu
+npm run register-commands  # Sync command menus for enabled bot platforms
 npm run healthcheck         # Check the local bot health endpoint
 ```
 
@@ -48,4 +55,4 @@ PS D:\zeus>
 To more advance test, please create `/test` folder and its `*.test.js` file for more advance
 
 ## LICENSE
-ZEUS Platform is based on Santaa v1.3.0 Debloat Version with built in Telegram platform and is using Apache-2.0 License, see [LICENSE](https://github.com/sn00bol/De-santaa/blob/main/LICENSE) for more details
+ZEUS Discord and Telegram are based on Santaa v1.3.0 Debloat Version is using Apache-2.0 License, see [LICENSE](https://github.com/sn00bol/De-santaa/blob/main/LICENSE) for more details

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import getpass
 import json
 import re
@@ -103,13 +104,21 @@ def read_env(path: Path) -> dict[str, str]:
     return values
 
 
-def update_env(path: Path, values: dict[str, str]) -> None:
+def update_env(
+    path: Path,
+    values: dict[str, str],
+    *,
+    remove_keys: set[str] | None = None,
+) -> None:
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    remove_keys = remove_keys or set()
     updated: set[str] = set()
     result: list[str] = []
     for line in lines:
         match = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
         key = match.group(1) if match else None
+        if key in remove_keys:
+            continue
         if key and key in values:
             result.append(f"{key}={values[key]}")
             updated.add(key)
@@ -119,6 +128,58 @@ def update_env(path: Path, values: dict[str, str]) -> None:
         if key not in updated:
             result.append(f"{key}={value}")
     path.write_text("\n".join(result) + "\n", encoding="utf-8")
+
+
+def save_platform_settings(
+    root: Path,
+    platform_selection: str,
+    config: dict[str, str],
+) -> None:
+    async def save() -> None:
+        import asyncpg
+
+        connection = await asyncpg.connect(
+            host=config["DB_HOST"],
+            port=int(config["DB_PORT"]),
+            database=config["DB_NAME"],
+            user=config["DB_USER"],
+            password=config["DB_PASSWORD"],
+        )
+        try:
+            schema = (root / "database" / "schema.sql").read_text(encoding="utf-8")
+            await connection.execute(schema)
+            selected = set(_normalize_platform_selection(platform_selection).split(","))
+            await connection.executemany(
+                """
+                INSERT INTO platform_settings (platform, enabled, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (platform) DO UPDATE
+                SET enabled = EXCLUDED.enabled, updated_at = NOW()
+                """,
+                [(name, name in selected) for name in ("webui", "discord", "telegram")],
+            )
+        finally:
+            await connection.close()
+
+    try:
+        asyncio.run(save())
+        return
+    except Exception as initial_error:
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError(
+                f"Could not save platform settings to PostgreSQL: {initial_error}"
+            ) from initial_error
+
+    subprocess.run(
+        [docker, "compose", "up", "-d", "--wait", "postgres"],
+        cwd=root,
+        check=True,
+    )
+    try:
+        asyncio.run(save())
+    except Exception as error:
+        raise RuntimeError(f"Could not save platform settings to PostgreSQL: {error}") from error
 
 
 def npm_install_command() -> list[str]:
@@ -403,6 +464,11 @@ def setup_project(
             print_warning("No .env.example found. Created empty .env file.")
 
     existing = read_env(env_path)
+    preserve_platform_settings = (
+        existing.get("CIG") == "true"
+        and "PLATFORM" not in existing
+        and not force_reconfig
+    )
 
     # Allow force re-configuration or auto-skip if CIG=true
     if existing.get("CIG") == "true" and not force_reconfig:
@@ -412,7 +478,6 @@ def setup_project(
         platform = _normalize_platform_selection(existing.get("PLATFORM", "webui"))
         provider = existing.get("ZEUS_PROVIDER", "ollama")
         config = {
-            "PLATFORM": platform,
             "ZEUS_PROVIDER": provider,
             "ZEUS_MODEL": existing.get("ZEUS_MODEL", ""),
             "LLM_HOST": existing.get("LLM_HOST", "localhost"),
@@ -483,7 +548,6 @@ def setup_project(
                 ollama_token = ollama_input
 
         config = {
-            "PLATFORM": platform,
             "ZEUS_PROVIDER": provider,
             "ZEUS_MODEL": model,
             "LLM_HOST": host,
@@ -522,22 +586,23 @@ def setup_project(
 
         config["CIG"] = "true"
 
-    update_env(env_path, config)
+    update_env(env_path, config, remove_keys={"PLATFORM"})
     print_success("Configuration saved to .env")
 
     # Dependency Installation
     print_step("Installing Dependencies")
     run_with_spinner(npm_install_command(), cwd=root, desc="Installing Node.js dependencies")
     run_with_spinner([sys.executable, "-m", "pip", "install", "."], cwd=root, desc="Installing Python packages")
+    if preserve_platform_settings:
+        print_info("Keeping the existing platform selection stored in PostgreSQL.")
+    else:
+        save_platform_settings(root, platform, config)
+        print_success("Platform selection saved to PostgreSQL")
     if "telegram" in platform.split(","):
         print_warning("Telegram support is currently in preview and testing")
 
     # Summary
     print(f"\n{Colors.GREEN}{Colors.BOLD}🎉 ZEUS Setup Complete!{Colors.RESET}")
-    print(f"  • Platforms : {Colors.CYAN}{platform.replace(',', ' + ')}{Colors.RESET}")
-    print(f"  • Provider  : {Colors.CYAN}{provider}{Colors.RESET}")
-    print(f"  • LLM Target: {Colors.CYAN}{config['LLM_HOST']}:{config['LLM_PORT']}{Colors.RESET}\n")
-
     print(f"To run ZEUS, use {Colors.BOLD}{Colors.YELLOW}python app.py{Colors.RESET}\n")
 
     return config

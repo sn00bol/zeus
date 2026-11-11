@@ -1,4 +1,4 @@
-const { requestJson } = require('../utils/agent/agentBridge');
+const { requestJson } = require('../Adapter').bridge;
 
 module.exports = {
     name: 'restart',
@@ -11,7 +11,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'restart', platform: process.env.PLATFORM || 'telegram' },
+            body: { action: 'restart', platform: 'telegram' },
         });
         await ctx.reply('Restart requested. ZEUS will reconnect shortly.');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

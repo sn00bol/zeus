@@ -1,5 +1,5 @@
-const { getConversationUsage } = require('../../shared/utils/sessionCommands');
-const { formatTokens } = require('../../shared/utils/tokenFormat');
+const { getConversationUsage } = require('../CommandHandler').sessionCommands;
+const { formatTokens } = require('../Adapter').tokenFormat;
 
 module.exports = {
     name: 'usage',

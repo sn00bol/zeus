@@ -141,3 +141,13 @@ CREATE TABLE IF NOT EXISTS telegram_home_chat (
     chat_id TEXT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS platform_settings (
+    platform TEXT PRIMARY KEY CHECK (platform IN ('webui', 'discord', 'telegram')),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO platform_settings (platform, enabled)
+VALUES ('webui', TRUE), ('discord', FALSE), ('telegram', FALSE)
+ON CONFLICT (platform) DO NOTHING;

@@ -1,6 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
-const { getConversationStatus } = require('../../shared/utils/sessionCommands');
-const { getStatusSummary } = require('../../shared/utils/statusSummary');
+const { getConversationStatus } = require('../CommandHandler').sessionCommands;
+const { getStatusSummary } = require('../Adapter').statusSummary;
 
 module.exports = {
     name: 'status',

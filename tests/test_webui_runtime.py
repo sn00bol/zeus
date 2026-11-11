@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
+
 from core.model import ModelContext
 from router.router import InferenceRequest, Message, Router
 from src.tools.search import SearchResult
@@ -302,6 +304,50 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enabled["reasoning_effort"], "medium")
         self.assertNotIn("think", enabled)
 
+    def test_ollama_gemma_does_not_receive_unsupported_reasoning_effort(self) -> None:
+        payload = Router._chat_payload(
+            SimpleNamespace(name="ollama"),
+            "gemma4:31b-cloud",
+            [{"role": "user", "content": "Retry this prompt."}],
+            0.7,
+            None,
+            {"think": True},
+            stream=False,
+            think=True,
+        )
+
+        self.assertNotIn("reasoning_effort", payload)
+        self.assertNotIn("think", payload)
+
+    async def test_backend_errors_include_provider_response_detail(self) -> None:
+        def respond(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                400,
+                json={"error": "unsupported request option"},
+                request=request,
+            )
+
+        provider = SimpleNamespace(
+            name="ollama",
+            endpoint=SimpleNamespace(base_url="http://model"),
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "ollama model 'gemma4:31b-cloud' returned HTTP 400: unsupported request option",
+            ):
+                await Router._call_backend(
+                    provider=provider,
+                    model_id="gemma4:31b-cloud",
+                    messages=[{"role": "user", "content": "hello"}],
+                    temperature=0.7,
+                    max_tokens=None,
+                    stream=False,
+                    extra={"think": True},
+                    client=client,
+                    think=True,
+                )
+
     def test_webui_search_selection_is_not_forwarded_as_native_model_tools(self) -> None:
         payload = Router._chat_payload(
             SimpleNamespace(name="ollama"),
@@ -443,7 +489,7 @@ class RouterStreamingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.completion_tokens, 1)
         self.assertEqual(client.call[0], "POST")
         self.assertEqual(client.call[1], "http://model/v1/chat/completions")
-        self.assertEqual(client.call[2]["json"]["reasoning_effort"], "none")
+        self.assertNotIn("reasoning_effort", client.call[2]["json"])
 
     def test_parse_response_preserves_ollama_model_alias(self) -> None:
         response = Router._parse_response(

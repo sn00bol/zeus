@@ -1,13 +1,10 @@
 {
-  "main": "platform/index.js",
   "scripts": {
-    "start": "node platform/index.js",
-    "dev": "nodemon platform/index.js",
-    "webui": "node webui/app.js",
-    "register-commands": "node platform/scripts/registerCommands.js",
-    "slash-register": "node platform/scripts/registerCommands.js",
-    "slash-reset": "node platform/scripts/registerCommands.js --reset",
-    "healthcheck": "node platform/scripts/healthcheck.js",
+    "dev": "nodemon --watch platform --ext js --exec \"python app.py\"",
+    "register-commands": "node platform/registerCommands.js",
+    "slash-register": "node platform/registerCommands.js",
+    "slash-reset": "node platform/registerCommands.js --reset",
+    "healthcheck": "node platform/healthcheck.js",
     "test": "node --test"
   },
   "author": "sn00bol",

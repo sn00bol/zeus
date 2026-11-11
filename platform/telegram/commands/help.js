@@ -1,4 +1,4 @@
-const { sendFormattedMessage } = require('../utils/formatter');
+const { sendFormattedMessage } = require('../Adapter').formatter;
 
 module.exports = {
     name: 'help',

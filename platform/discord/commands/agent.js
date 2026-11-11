@@ -1,9 +1,9 @@
-const { replyToCommand } = require('../utils/commandInteraction');
+const { replyToCommand } = require('../CommandHandler').commandInteraction;
 const {
     generateConversationReply,
     storeAssistantReply,
-} = require('../utils/agentConversation');
-const { formatAgentResponse } = require('../utils/chatThreads');
+} = require('../Adapter').conversation;
+const { formatAgentResponse } = require('../Adapter').chatThreads;
 
 function getPrompt(context, args) {
     if (context.isChatInputCommand?.()) {

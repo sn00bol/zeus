@@ -16,7 +16,6 @@ In particular, `DB_PASSWORD` must be set before Compose can start PostgreSQL.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PLATFORM` | `webui` | Enables the WebUI and optionally Discord, Telegram, or both: `webui`, `webui,discord`, `webui,telegram`, or `webui,discord,telegram`. |
 | `ZEUS_PROVIDER` | unset | Preferred provider: `ollama`, `lmstudio`, or `llamacpp`. If unset, ZEUS selects a reachable provider. |
 | `ZEUS_MODEL` | unset | Preferred model ID. Leave empty to use the first model discovered by the selected provider. The WebUI can also select a model per conversation. |
 | `LLM_HOST` | provider-dependent | Hostname or IP address of the model server when running ZEUS directly on the host. |
@@ -95,10 +94,10 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 
 | Variable | Description |
 | --- | --- |
-| `DISCORD_BOT_API_KEY` | Discord bot token. Required when `PLATFORM` includes `discord`. |
-| `PFX` | Discord message-command prefix. Required when running the Discord bot. |
+| `DISCORD_BOT_API_KEY` | Discord bot token. Required when Discord is enabled in the setup selection stored in PostgreSQL. |
+| `PFX` | Optional Discord message-command prefix. Leave empty to disable prefix commands and use slash commands only. |
 | `OWNER_ID` | Optional comma-separated Discord user IDs allowed to use owner-only restart/stop commands. |
-| `TELEGRAM_BOT_API_KEY` | Telegram bot token. Required when `PLATFORM` includes `telegram`. |
+| `TELEGRAM_BOT_API_KEY` | Telegram bot token. Required when Telegram is enabled in the setup selection stored in PostgreSQL. |
 | `SLASH_GUILD_ID` | Optional Discord server ID for faster guild-scoped slash-command registration. |
 | `SLASH_RESET` | Set to `true` for a one-time reset of registered Discord slash commands. |
 | `BRIDGE_HOST` | Bind address for the Discord/Telegram platform inference bridge. |

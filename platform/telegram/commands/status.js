@@ -1,6 +1,6 @@
-const { sendFormattedMessage } = require('../utils/formatter');
-const { getConversationStatus } = require('../../shared/utils/sessionCommands');
-const { getStatusSummary } = require('../../shared/utils/statusSummary');
+const { sendFormattedMessage } = require('../Adapter').formatter;
+const { getConversationStatus } = require('../CommandHandler').sessionCommands;
+const { getStatusSummary } = require('../Adapter').statusSummary;
 
 module.exports = {
     name: 'status',

@@ -54,10 +54,10 @@ to run `python app.py` separately when using Compose.
      `host.docker.internal` is normally appropriate. For a provider in another
      Compose service or on another machine, use that service name or reachable
      hostname instead.
-   - Leave `PLATFORM=webui` for WebUI-only. For a bot, use
-     `PLATFORM=webui,discord` or `PLATFORM=webui,telegram`; to run both use
-     `PLATFORM=webui,discord,telegram`. Fill in the token for each selected bot.
-     Discord also requires `PFX`.
+   - Choose WebUI, Discord, and/or Telegram in `python setup.py`. WebUI is
+     always enabled; the selection is saved in PostgreSQL, not `.env`. Fill in
+     the token for each selected bot. Discord's message-command prefix is
+     optional; leave it empty to use slash commands only.
    - Set `BRIDGE_TOKEN` to a long random value for the private Discord/Telegram
      bridge. Running `python setup.py` generates and saves it automatically.
 
@@ -185,13 +185,15 @@ docker compose up -d searxng
 ## Optional: configure interactively
 
 `setup.py` can create/update `.env`, select a provider and platform, discover
-available models, and install Python and Node dependencies on the host:
+available models, install Python and Node dependencies, and save the selected
+platforms to PostgreSQL:
 
 ```bash
 python setup.py
 ```
 
-This is optional for Docker-only use. If setup is run, review the generated
+This is optional for Docker-only use. Setup requires PostgreSQL to be reachable
+or Docker Compose available to start it. If setup is run, review the generated
 `.env` and ensure `ZEUS_LLM_HOST` is appropriate for Docker before starting
 Compose.
 

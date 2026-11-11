@@ -273,6 +273,49 @@ async function getTelegramHomeChat() {
     return rows[0]?.chat_id || null;
 }
 
+async function getPlatformSettings() {
+    const { rows } = await pool.query(
+        'SELECT platform, enabled FROM platform_settings ORDER BY platform',
+    );
+    return Object.fromEntries(rows.map(({ platform, enabled }) => [platform, enabled]));
+}
+
+async function setPlatformSettings(settings) {
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+        throw new TypeError('Platform settings must be an object.');
+    }
+    const platforms = ['webui', 'discord', 'telegram'];
+    for (const [platform, enabled] of Object.entries(settings)) {
+        if (!platforms.includes(platform) || typeof enabled !== 'boolean') {
+            throw new TypeError('Platform settings must contain supported platform names and boolean values.');
+        }
+    }
+    if (settings.webui === false) {
+        throw new TypeError('The WebUI platform must remain enabled.');
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const platform of platforms) {
+            if (settings[platform] === undefined) continue;
+            await client.query(`
+                INSERT INTO platform_settings (platform, enabled, updated_at)
+                VALUES ($1, $2, NOW())
+                ON CONFLICT (platform) DO UPDATE
+                SET enabled = EXCLUDED.enabled, updated_at = NOW()
+            `, [platform, settings[platform]]);
+        }
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+    return getPlatformSettings();
+}
+
 async function close() {
     if (initialization) await initialization.catch(() => {});
     initialization = undefined;
@@ -289,6 +332,7 @@ const database = {
     getChatThread,
     getHomeChannel,
     getModelPreference,
+    getPlatformSettings,
     getRetryPrompt,
     getSession,
     getSessionUsage,
@@ -299,6 +343,7 @@ const database = {
     recordUserActivity,
     removeChatThread,
     setModelPreference,
+    setPlatformSettings,
     setHelpPreference,
     setHomeChannel,
     getTelegramHomeChat,

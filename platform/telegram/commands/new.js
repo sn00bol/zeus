@@ -1,5 +1,5 @@
-const { resetConversation } = require('../../shared/utils/sessionCommands');
-const { respondToUser } = require('../utils/chatThreads');
+const { resetConversation } = require('../CommandHandler').sessionCommands;
+const { respondToUser } = require('../Adapter').chatThreads;
 
 module.exports = {
     name: 'new',

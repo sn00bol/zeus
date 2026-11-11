@@ -465,7 +465,6 @@ const themeStyles = String.raw`
         .model-option:hover, .model-option[aria-selected="true"] { background: #ffffff0b; color: #fff; }
         .model-option-copy { min-width: 0; display: grid; gap: 3px; }
         .model-option-provider { color: #818b9d; font-size: 9px; }
-        .model-picker-more { width: 100%; border: 0; border-top: 1px solid #ffffff0c; color: #737d91; background: transparent; text-align: left; font-size: 10px; padding: 9px; }
         .model-picker-manage { width: 100%; margin-top: 4px; border: 0; border-top: 1px solid #ffffff0c; border-radius: 0 0 7px 7px; padding: 10px 9px 5px; color: #aab4c5; background: transparent; text-align: left; font-size: 11px; cursor: pointer; }
         .model-picker-manage:hover { color: #ffffff; background: #ffffff0b; }
         .composer textarea { display: block; flex: 1; min-width: 0; width: 100%; min-height: 32px; max-height: 170px; overflow-y: auto; scrollbar-width: none; resize: none; border: 0; outline: 0; padding: 5px 12px 5px 0; color: #edf0f7; background: transparent; font-size: 14px; line-height: 22px; }

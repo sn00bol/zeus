@@ -751,7 +751,10 @@ class Router:
         payload.pop("search_query", None)
         payload.pop("search_skill", None)
         if provider.name == "ollama":
-            payload["reasoning_effort"] = "medium" if think else "none"
+            if "gemma" in model_id.lower():
+                payload.pop("reasoning_effort", None)
+            else:
+                payload["reasoning_effort"] = "medium" if think else "none"
         elif hasattr(provider, "supports_thinking"):
             if getattr(provider, "supports_thinking"):
                 payload["reasoning_effort"] = "medium" if think else "none"
@@ -855,7 +858,29 @@ class Router:
                     raise RuntimeError(
                         f"Ollama could not run model '{model_id}': {detail}"
                     )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = ""
+            try:
+                error_data = resp.json()
+            except ValueError:
+                error_data = None
+            if isinstance(error_data, dict):
+                error = error_data.get("error")
+                if isinstance(error, dict):
+                    error = error.get("message")
+                if isinstance(error, str):
+                    detail = error.strip()
+            if not detail:
+                detail = str(getattr(resp, "text", "")).strip()
+            if detail:
+                detail = detail[:500]
+                raise RuntimeError(
+                    f"{provider.name} model '{model_id}' returned HTTP "
+                    f"{resp.status_code}: {detail}"
+                ) from exc
+            raise
         data = resp.json()
         if provider.name == "ollama" and "message" in data:
             return {

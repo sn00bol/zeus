@@ -1,11 +1,14 @@
 require('dotenv').config();
-const dbmanager = require('../shared/database/dbmanager');
-const { createTelegramClient } = require('./handlers/clientHandler');
-const { registerCommandHandlers, loadCommands } = require('./handlers/commandHandler');
-const { connectData } = require('./handlers/databaseHandler');
-const { createHealthcheckServer } = require('./handlers/healthcheckHandler');
-const { registerShutdownHandlers } = require('./handlers/lifecycleHandler');
-const { synchronizeTelegramCommands } = require('./scripts/registerCommands');
+const dbmanager = require('../../core/database');
+const { createTelegramClient } = require('./gateway');
+const {
+    connectData,
+    loadCommands,
+    registerCommandHandlers,
+    registerShutdownHandlers,
+    synchronizeTelegramCommands,
+} = require('./CommandHandler');
+const { createHealthcheckServer } = require('./healthcheckHandler');
 
 const bot = createTelegramClient();
 const state = {

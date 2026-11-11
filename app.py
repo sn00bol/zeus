@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import shutil
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import TextIO
 from urllib.error import URLError
 from urllib.parse import urlsplit
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
@@ -109,8 +110,15 @@ def _wait_for_bridge(process: subprocess.Popen[str], port: int, timeout: float =
 
 def _poll_control(port: int) -> tuple[str, str | None] | None:
     control_url = f"http://127.0.0.1:{port}/control/next"
+    bridge_token = os.environ.get("BRIDGE_TOKEN", "").strip()
+    if not bridge_token:
+        raise RuntimeError("BRIDGE_TOKEN is required to poll bridge control requests.")
     try:
-        with urlopen(control_url, timeout=0.5) as response:
+        request = Request(
+            control_url,
+            headers={"Authorization": f"Bearer {bridge_token}"},
+        )
+        with urlopen(request, timeout=0.5) as response:
             if response.status != 200:
                 raise RuntimeError(f"Supervisor control request failed ({response.status}).")
             payload = json.loads(response.read())
@@ -176,21 +184,50 @@ def _webui_port() -> int:
     return _configured_port("WEBUI_PORT", 3000)
 
 
-def _selected_platforms(value: str | None = None) -> tuple[str, ...]:
-    raw = os.environ.get("PLATFORM", "webui") if value is None else value
-    selected = [item.strip().lower() for item in raw.split(",") if item.strip()]
-    if not selected:
-        selected = ["webui"]
-    if "webui" not in selected:
-        selected.insert(0, "webui")
-    unsupported = set(selected) - {"webui", "discord", "telegram"}
+def _selected_platforms(settings: dict[str, bool]) -> tuple[str, ...]:
+    unsupported = set(settings) - {"webui", "discord", "telegram"}
     if unsupported:
         raise RuntimeError(
-            f"Unsupported platform(s) {', '.join(sorted(unsupported))}. "
-            "Choose WebUI and optionally Discord or Telegram."
+            f"Database contains unsupported platform(s): {', '.join(sorted(unsupported))}."
         )
-    bot_platforms = [item for item in ("discord", "telegram") if item in selected]
-    return ("webui", *bot_platforms)
+    if settings.get("webui") is not True:
+        raise RuntimeError("The WebUI platform must be enabled in the database.")
+    return ("webui", *(
+        platform for platform in ("discord", "telegram")
+        if settings.get(platform) is True
+    ))
+
+
+async def _read_platform_settings() -> dict[str, bool]:
+    try:
+        import asyncpg
+    except ImportError as exc:
+        raise RuntimeError("asyncpg is required to read platform settings from PostgreSQL.") from exc
+
+    connection = await asyncpg.connect(
+        host=os.environ.get("DB_HOST", "127.0.0.1"),
+        port=int(os.environ.get("DB_PORT", "5432")),
+        database=os.environ.get("DB_NAME", "zeus"),
+        user=os.environ.get("DB_USER", "zeus"),
+        password=os.environ.get("DB_PASSWORD"),
+    )
+    try:
+        schema_path = ROOT / "database" / "schema.sql"
+        await connection.execute(schema_path.read_text(encoding="utf-8"))
+        rows = await connection.fetch(
+            "SELECT platform, enabled FROM platform_settings",
+        )
+        return {row["platform"]: row["enabled"] for row in rows}
+    finally:
+        await connection.close()
+
+
+def _load_selected_platforms() -> tuple[str, ...]:
+    try:
+        settings = asyncio.run(_read_platform_settings())
+    except Exception as exc:
+        raise RuntimeError(f"Could not load platform settings from PostgreSQL: {exc}") from exc
+    return _selected_platforms(settings)
 
 
 def _host_environment() -> dict[str, str]:
@@ -228,7 +265,7 @@ def _start_webui(
         raise
 
 
-def run_webui() -> int:
+def run_webui(*, services_started: bool = False) -> int:
     if not os.environ.get("DB_PASSWORD"):
         raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
 
@@ -236,12 +273,13 @@ def run_webui() -> int:
         docker = shutil.which("docker")
         if docker is None:
             raise RuntimeError("Docker is required to start PostgreSQL and SearXNG.")
-        _require_docker_engine(docker)
-        subprocess.run(
-            [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
-            cwd=ROOT,
-            check=True,
-        )
+        if not services_started:
+            _require_docker_engine(docker)
+            subprocess.run(
+                [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
+                cwd=ROOT,
+                check=True,
+            )
         environment = _host_environment()
     else:
         environment = os.environ.copy()
@@ -283,6 +321,7 @@ def run_platforms(
     names: tuple[str, ...],
     record_logs: bool = False,
     with_webui: bool = False,
+    services_started: bool = False,
 ) -> int:
     if not names or any(name not in {"discord", "telegram"} for name in names):
         raise ValueError("At least one supported bot platform must be selected.")
@@ -294,11 +333,6 @@ def run_platforms(
         )
         if not token or token == "YOUR_BOT_TOKEN":
             raise RuntimeError(f"Set the API key in .env before starting {name}.")
-        if name == "discord" and (
-            not os.environ.get("PFX") or os.environ["PFX"] == "YOUR_BOT_PREFIX"
-        ):
-            raise RuntimeError("Set PFX in .env before starting Discord.")
-
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("Node.js is required to start the platform.")
@@ -312,7 +346,8 @@ def run_platforms(
         docker = shutil.which("docker")
         if docker is None:
             raise RuntimeError("Docker is required to start PostgreSQL and SearXNG.")
-        _require_docker_engine(docker)
+        if not services_started:
+            _require_docker_engine(docker)
         process_environment = _host_environment()
 
     port = _configured_port("BRIDGE_PORT", 5000)
@@ -325,6 +360,8 @@ def run_platforms(
     try:
         if managed_database:
             print("Using PostgreSQL provided by the container orchestrator.")
+        elif services_started:
+            print("Using the already started PostgreSQL and SearXNG services.")
         elif recorder:
             recorder.record("Starting PostgreSQL and SearXNG.")
             compose = subprocess.run(
@@ -372,7 +409,6 @@ def run_platforms(
         for name in names:
             bot_environment = process_environment.copy()
             bot_environment["ZEUS_SUPERVISED"] = "1"
-            bot_environment["PLATFORM"] = name
             if with_webui:
                 while next_healthcheck_port in used_healthcheck_ports:
                     next_healthcheck_port += 1
@@ -467,15 +503,30 @@ def main() -> int:
         help="save process logs on shutdown while keeping the console quiet",
     )
     args = parser.parse_args()
-    platforms = _selected_platforms()
+    if not os.environ.get("DB_PASSWORD"):
+        raise RuntimeError("Set DB_PASSWORD in .env or run `python setup.py` to generate it.")
+
+    if not _uses_managed_database():
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError("Docker is required to start PostgreSQL and SearXNG.")
+        _require_docker_engine(docker)
+        subprocess.run(
+            [docker, "compose", "up", "-d", "--wait", "postgres", "searxng"],
+            cwd=ROOT,
+            check=True,
+        )
+
+    platforms = _load_selected_platforms()
     bot_platforms = tuple(name for name in platforms if name != "webui")
     if bot_platforms:
         return run_platforms(
             names=bot_platforms,
             record_logs=args.logs and "discord" in bot_platforms,
             with_webui=True,
+            services_started=True,
         )
-    return run_webui()
+    return run_webui(services_started=True)
 
 
 if __name__ == "__main__":

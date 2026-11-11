@@ -1,4 +1,4 @@
-const { requestJson } = require('../utils/agentBridge');
+const { requestJson } = require('../Adapter').bridge;
 
 module.exports = {
     name: 'restart',
@@ -14,7 +14,7 @@ module.exports = {
         }
         await requestJson('/control', {
             method: 'POST',
-            body: { action: 'restart', platform: process.env.PLATFORM || 'discord' },
+            body: { action: 'restart', platform: 'discord' },
         });
         await message.reply('Restart requested. Begin restarting... Done!');
         setTimeout(() => process.kill(process.pid, 'SIGTERM'), 750).unref();

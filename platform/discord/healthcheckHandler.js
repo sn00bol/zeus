@@ -1,4 +1,4 @@
-const { createHealthcheckServer: createSharedHealthcheckServer } = require('../../shared/handlers/healthcheckServer');
+const { createHealthcheckServer: createSharedHealthcheckServer } = require('./healthcheckServer');
 
 function createHealthcheckServer(client, state) {
     return createSharedHealthcheckServer(

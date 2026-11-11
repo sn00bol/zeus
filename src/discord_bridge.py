@@ -359,7 +359,7 @@ class BridgeApplication:
 
             if path == "/agent/run":
                 try:
-                    run = _agent_runner.submit(request)
+                    run = await _agent_runner.submit(request)
                 except AgentQueueFull as exc:
                     await _send_json(send, {"error": str(exc)}, status=503)
                     return

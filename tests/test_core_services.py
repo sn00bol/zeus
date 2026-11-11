@@ -26,7 +26,7 @@ from src.provider import (
 )
 from src.provider.base import ModelLimits
 from src.tools.search import SearchResult
-from src import discord_bridge
+from src import discord_bridge, telegram_bridge
 
 
 class FakeProvider:
@@ -1033,7 +1033,7 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         class FakeAgentRunner:
-            def submit(self, request: object) -> SimpleNamespace:
+            async def submit(self, request: object) -> SimpleNamespace:
                 submitted["request"] = request
                 return SimpleNamespace(run_id="run-1", status="queued")
 
@@ -1082,6 +1082,49 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.session.session_id, 11)
         self.assertEqual(request.platform, "discord")
         self.assertEqual(responses[0]["status"], 202)
+
+    async def test_telegram_bridge_awaits_agent_submission(self) -> None:
+        class FakeAgentRunner:
+            async def submit(self, request: object) -> SimpleNamespace:
+                return SimpleNamespace(run_id="run-1", status="queued")
+
+        events = [{
+            "type": "http.request",
+            "body": json.dumps({
+                "provider": "ollama",
+                "model": "llama-test",
+                "platform": "telegram",
+                "messages": [{"role": "user", "content": "hello"}],
+            }).encode("utf-8"),
+            "more_body": False,
+        }]
+        responses: list[dict[str, object]] = []
+
+        async def receive() -> dict[str, object]:
+            return events.pop(0)
+
+        async def send(event: dict[str, object]) -> None:
+            responses.append(event)
+
+        with (
+            patch.object(telegram_bridge, "_agent_runner", FakeAgentRunner()),
+            patch.object(telegram_bridge, "_BRIDGE_TOKEN", "test-bridge-token"),
+        ):
+            await telegram_bridge.BridgeApplication()._http(
+                {
+                    "method": "POST",
+                    "path": "/agent/run",
+                    "headers": [(b"authorization", b"Bearer test-bridge-token")],
+                },
+                receive,
+                send,
+            )
+
+        self.assertEqual(responses[0]["status"], 202)
+        self.assertEqual(json.loads(responses[1]["body"]), {
+            "run_id": "run-1",
+            "status": "queued",
+        })
 
 
 class ProviderEndpointConfigurationTests(unittest.TestCase):

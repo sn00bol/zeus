@@ -1,4 +1,4 @@
-const { respondToUser } = require('../utils/chatThreads');
+const { respondToUser } = require('../Adapter').chatThreads;
 
 module.exports = {
     name: 'agent',

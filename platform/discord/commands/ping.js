@@ -1,4 +1,4 @@
-const { getCommandUser, replyToCommand, sendCommandMessage } = require('../utils/commandInteraction');
+const { getCommandUser, replyToCommand, sendCommandMessage } = require('../CommandHandler').commandInteraction;
 module.exports = {
     name: 'ping',
     description: 'Test the bot\'s latency',

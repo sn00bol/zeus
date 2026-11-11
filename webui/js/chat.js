@@ -656,8 +656,7 @@ function renderModelMenu() {
     automatic.addEventListener('click', () => chooseModel(null));
     modelMenu.append(automatic);
 
-    const shown = modelChoices.slice(0, 4);
-    for (const model of shown) {
+    for (const model of modelChoices) {
         const option = document.createElement('button');
         option.type = 'button';
         option.className = 'model-option';
@@ -676,14 +675,6 @@ function renderModelMenu() {
         option.append(copy);
         option.addEventListener('click', () => chooseModel(model));
         modelMenu.append(option);
-    }
-    if (modelChoices.length > 4) {
-        const more = document.createElement('button');
-        more.className = 'model-picker-more';
-        more.type = 'button';
-        more.disabled = true;
-        more.textContent = 'Show more — coming soon';
-        modelMenu.append(more);
     }
     const manage = document.createElement('button');
     manage.className = 'model-picker-manage';

@@ -1,5 +1,6 @@
 const http = require('node:http');
-require('dotenv').config({ path: require('node:path').join(__dirname, '..', '..', '.env') });
+require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
+const database = require('../core/database');
 
 function checkEndpoint(port, expectedBody = 'ready') {
     return new Promise((resolve, reject) => {
@@ -29,17 +30,19 @@ function checkEndpoint(port, expectedBody = 'ready') {
     });
 }
 
-function checkHealth() {
-    const selected = (process.env.PLATFORM || 'webui')
-        .split(',')
-        .map(platform => platform.trim().toLowerCase())
-        .filter(Boolean);
-    if (!selected.includes('webui')) selected.unshift('webui');
+async function checkHealth({ getPlatformSettings = async () => {
+    await database.init();
+    return database.getPlatformSettings();
+} } = {}) {
+    const settings = await getPlatformSettings();
+    if (settings.webui !== true) {
+        throw new Error('The WebUI platform must remain enabled in the database.');
+    }
     const webuiPort = Number(process.env.WEBUI_PORT) || 3000;
     const checks = [
         checkEndpoint(webuiPort),
     ];
-    const bots = ['discord', 'telegram'].filter(platform => selected.includes(platform));
+    const bots = ['discord', 'telegram'].filter(platform => settings[platform] === true);
     let healthcheckPort = Number(process.env.HEALTHCHECK_PORT) || 3001;
     for (let index = 0; index < bots.length; index += 1) {
         if (healthcheckPort === webuiPort) healthcheckPort += 1;

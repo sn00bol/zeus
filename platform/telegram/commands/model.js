@@ -1,22 +1,50 @@
-const { getModelScope } = require('../utils/agent/agentConversation');
-const { sendFormattedMessage } = require('../utils/formatter');
+const { getModelScope } = require('../Adapter').conversation;
+const { formatText, sendFormattedMessage } = require('../Adapter').formatter;
 const {
     getEnvironmentModelSelection,
     getAvailableModels,
     setModelToAutomatic,
     setPreferredModel,
-} = require('../../shared/utils/modelService');
+} = require('../Adapter').modelService;
 
 const ACTIONS = new Set(['list', 'set', 'auto']);
+const MODEL_LIST_MESSAGE_LIMIT = 3_800;
+
+function createModelListMessages(lines, footer) {
+    const messages = [];
+    const heading = '**Available models**';
+    const continuedHeading = '**Available models (continued)**';
+    let current = heading;
+    for (const line of lines) {
+        const next = `${current}\n${line}`;
+        if (formatText(next).length > MODEL_LIST_MESSAGE_LIMIT) {
+            if (current === heading || current === continuedHeading) {
+                throw new Error('A model entry is too long to display.');
+            }
+            messages.push(current);
+            current = continuedHeading;
+        }
+        current += `\n${line}`;
+    }
+
+    const finalMessage = `${current}\n\n${footer}`;
+    if (formatText(finalMessage).length <= MODEL_LIST_MESSAGE_LIMIT) {
+        messages.push(finalMessage);
+    } else {
+        messages.push(current);
+        messages.push(`**Model selection**\n\n${footer}`);
+    }
+    return messages;
+}
 
 module.exports = {
     name: 'model',
-    description: 'List or select the AI provider and locally loaded model',
+    description: 'List or select an available AI provider and model',
     usage: '/model [list|set <provider> <model>|auto]',
     async execute(bot, ctx, args = []) {
         const action = (args[0] || 'list').toLowerCase();
         const userId = String(ctx.from.id);
-        const scopeId = getModelScope(userId);
+        const scopeId = getModelScope('telegram', null, userId);
 
         if (!ACTIONS.has(action)) {
             await ctx.reply('Use /model list, /model set <provider> <model>, or /model auto.');
@@ -27,7 +55,7 @@ module.exports = {
             if (action === 'list') {
                 const { models, preference: current } = await getAvailableModels(bot.db, scopeId);
                 if (!Array.isArray(models) || models.length === 0) {
-                    await ctx.reply('No local AI models are available. Start a provider and load a model.');
+                    await ctx.reply('No AI models are currently available. Check that your providers are running and have models loaded.');
                     return;
                 }
 
@@ -38,23 +66,13 @@ module.exports = {
                         && effective?.model === item.model ? ' (selected)' : '';
                     return `• \`${item.provider}\` — \`${item.model}\`${selected}`;
                 });
-                const visibleLines = [];
-                let outputLength = 0;
-                for (const line of lines) {
-                    if (outputLength + line.length > 1_800) break;
-                    visibleLines.push(line);
-                    outputLength += line.length + 1;
-                }
-                if (lines.length > visibleLines.length) {
-                    visibleLines.push(`…and ${lines.length - visibleLines.length} more.`);
-                }
                 const mode = current?.provider
                     ? `Selected for this user: \`${current.provider}/${current.model}\``
                     : `Default from .env: \`${effective.provider}/${effective.model}\``;
-                await sendFormattedMessage(
-                    ctx,
-                    `**Available local models**\n${visibleLines.join('\n')}\n\n${mode}`,
-                );
+                const messages = createModelListMessages(lines, mode);
+                for (const message of messages) {
+                    await sendFormattedMessage(ctx, message);
+                }
                 return;
             }
 

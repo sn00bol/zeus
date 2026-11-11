@@ -1,10 +1,10 @@
-const { getCommandUser, replyToCommand, sendCommandMessage } = require('../utils/commandInteraction');
+const { getCommandUser, replyToCommand, sendCommandMessage } = require('../CommandHandler').commandInteraction;
 const { EmbedBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle, ComponentType } = require('discord.js');
 const packageInfo = require('../../../package.json');
 require('dotenv').config();
-const { getMenuRow, getPaginationRow, getOptions, applySelectMenuDefaults } = require('../utils/NavigateManager');
-const { isOwner: isOwnerUser } = require('../utils/permission');
-const { getSlashCommandValidationError } = require('../utils/slashCommand');
+const { getMenuRow, getPaginationRow, getOptions, applySelectMenuDefaults } = require('../CommandHandler').navigation;
+const { isOwner: isOwnerUser } = require('../CommandHandler').permission;
+const { getSlashCommandValidationError } = require('../CommandHandler').slashCommand;
 
 // In-memory fallback cache for category selection (used if DB is unavailable)
 const lastHelpCategoriesByUser = new Map();
