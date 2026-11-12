@@ -48,7 +48,8 @@ to run `python app.py` separately when using Compose.
      only when using a different SearXNG instance. `SEARXNG_PORT` defaults to
      `8888` for opening SearXNG from the host; change it only to use a
      different host port.
-   - Choose `ZEUS_PROVIDER` and optionally `ZEUS_MODEL`.
+   - Choose the default provider and model with `python setup.py`; these
+     settings and an optional Ollama API key are saved in PostgreSQL, not `.env`.
    - Set `ZEUS_LLM_HOST` to the address reachable **from the container**. For a
      provider running on the same machine, the default
      `host.docker.internal` is normally appropriate. For a provider in another

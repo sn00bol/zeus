@@ -49,7 +49,6 @@ class LlamaCppProvider(BaseProvider):
         port: int | None = None,
     ) -> None:
         _host, _port = _resolve_provider_address(
-            self.name,
             _DEFAULT_HOST,
             _DEFAULT_PORT,
             "LLAMACPP_HOST",

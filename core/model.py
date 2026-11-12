@@ -158,7 +158,7 @@ class ModelManager:
     def __init__(
         self,
         cache_ttl_seconds: float = 30.0,
-        provider_factory: Callable[[str], BaseProvider] = get_provider,
+        provider_factory: Callable[[str], BaseProvider] | None = None,
         memory_store: MemoryStore | None = None,
         skill_runtime: SkillRuntime | None = None,
         search_client: _SearchClient | None = None,
@@ -192,19 +192,67 @@ class ModelManager:
     def get_provider(self, name: str) -> BaseProvider:
         normalized = name.lower()
         if normalized not in self._providers:
-            self._providers[normalized] = self._provider_factory(normalized)
+            self._providers[normalized] = (
+                self._provider_factory(normalized)
+                if self._provider_factory is not None
+                else get_provider(normalized)
+            )
         return self._providers[normalized]
 
-    async def _provider_for(self, name: str) -> BaseProvider:
+    async def configuration(self) -> dict[str, str | None]:
+        if self._database is None:
+            return {"provider": None, "model": None, "ollama_api_key": None}
+        row = await self._database.fetchrow(
+            """
+            SELECT provider_name, model_id, ollama_api_key
+            FROM model_configuration
+            WHERE setting_id = 1
+            """
+        )
+        if row is None:
+            return {"provider": None, "model": None, "ollama_api_key": None}
+        return {
+            "provider": str(row["provider_name"] or "").strip().lower() or None,
+            "model": str(row["model_id"] or "").strip() or None,
+            "ollama_api_key": str(row["ollama_api_key"] or "").strip() or None,
+        }
+
+    async def _provider_for(
+        self,
+        name: str,
+        configuration: Mapping[str, str | None] | None = None,
+    ) -> BaseProvider:
         normalized = name.lower()
-        return self.get_provider(normalized)
+        settings = configuration or await self.configuration()
+        if normalized not in self._providers:
+            host = (
+                os.environ.get("LLM_HOST")
+                if settings["provider"] == normalized
+                else None
+            )
+            raw_port = (
+                os.environ.get("LLM_PORT")
+                if settings["provider"] == normalized
+                else None
+            )
+            port = int(raw_port) if raw_port and raw_port.lower() != "default" else None
+            if self._provider_factory is None:
+                self._providers[normalized] = get_provider(
+                    normalized,
+                    host=host,
+                    port=port,
+                )
+            else:
+                self._providers[normalized] = self._provider_factory(normalized)
+        return self._providers[normalized]
 
     async def available_providers(self) -> list[str]:
         names = ("ollama", "lmstudio", "llamacpp")
+        configuration = await self.configuration()
 
         async def is_available(name: str) -> bool:
             try:
-                return await self.get_provider(name).ping()
+                return await (await self._provider_for(name, configuration)).ping()
             except Exception:
                 log.debug("Provider %s is unavailable.", name, exc_info=True)
                 return False
@@ -282,6 +330,7 @@ class ModelManager:
         include_disabled: bool = False,
     ) -> list[dict[str, object]]:
         names = ("ollama", "lmstudio", "llamacpp")
+        configuration = await self.configuration()
         controls: dict[tuple[str, str], Mapping[str, Any]] = {}
         if self._database is not None:
             rows = await self._database.fetch(
@@ -297,7 +346,7 @@ class ModelManager:
 
         async def discover(name: str) -> list[dict[str, object]]:
             try:
-                provider = self.get_provider(name)
+                provider = await self._provider_for(name, configuration)
                 if not await provider.ping():
                     return []
                 discovered: list[dict[str, object]] = []
@@ -332,20 +381,11 @@ class ModelManager:
         discovered = [model for provider_models in results for model in provider_models]
         return discovered
 
-    @staticmethod
-    def get_access_token(provider_name: str) -> str | None:
-        name = provider_name.lower().replace("-", "_")
-        if name == "ollama":
-            for key in ("OLLAMA_API_KEY", "OLLAMA_TOKEN"):
-                token = os.environ.get(key)
-                if token:
-                    return token
-        return None
-
     async def resolve(self, request: _InferenceRequestLike) -> ModelContext:
+        configuration = await self.configuration()
         provider_name = (
             request.provider_name
-            or os.environ.get("ZEUS_PROVIDER")
+            or configuration["provider"]
             or ""
         ).lower()
         if not provider_name:
@@ -357,11 +397,11 @@ class ModelManager:
                 "Start Ollama, LM Studio, or llama-server and try again."
             )
 
-        provider = await self._provider_for(provider_name)
+        provider = await self._provider_for(provider_name, configuration)
         requested_model = request.model
         if requested_model and requested_model.strip().lower() in {"auto", "automatic"}:
             requested_model = None
-        configured_model = os.environ.get("ZEUS_MODEL", "").strip()
+        configured_model = configuration["model"] or ""
         if configured_model.lower() in {"auto", "automatic"}:
             configured_model = ""
         model_name = requested_model or configured_model or None
@@ -537,7 +577,11 @@ class ModelManager:
             model_name=model_name,
             api_token=(
                 getattr(provider, "api_token", None)
-                or self.get_access_token(provider_name)
+                or (
+                    configuration["ollama_api_key"]
+                    if provider_name == "ollama"
+                    else None
+                )
             ),
             messages=built_messages,
             temperature=(
@@ -561,9 +605,10 @@ class ModelManager:
         }
 
     async def status(self) -> dict[str, str | int | None]:
-        provider_name = self._last_provider_name or os.environ.get("ZEUS_PROVIDER", "").lower()
+        configuration = await self.configuration()
+        provider_name = self._last_provider_name or configuration["provider"] or ""
         model_name = self._last_model_name
-        configured_model = os.environ.get("ZEUS_MODEL", "").strip()
+        configured_model = configuration["model"] or ""
         if not model_name and configured_model.lower() not in {"auto", "automatic"}:
             model_name = configured_model or None
         context_length = self._last_context_length
@@ -590,6 +635,10 @@ class ModelManager:
             "model": model_name,
             "context_length": context_length,
         }
+
+    async def provider_for(self, name: str) -> BaseProvider:
+        """Return a provider configured with the current database defaults."""
+        return await self._provider_for(name)
 
     def invalidate(self, provider_name: str | None = None) -> None:
         if provider_name is None:

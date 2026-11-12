@@ -87,7 +87,7 @@ class InferenceRequest:
         available model on the active provider.
     provider_name : str | None
         Which backend to use ("ollama", "lmstudio", "llamacpp").
-        Defaults to the ZEUS_PROVIDER env var or dynamic complexity routing.
+        Defaults to the provider configured in the database or dynamic routing.
     stream : bool
         Whether to request a streaming response from the backend.
     temperature : float | None
@@ -451,6 +451,11 @@ class Router:
         req_stream = getattr(request, "stream", False)
         req_extra = getattr(request, "extra", {})
         strict_model = req_extra.get("strict_model") is True
+        disable_backend_timeout = (
+            platform == "webui"
+            and strict_model
+            and req_extra.get("disable_backend_timeout") is True
+        )
 
         await self.broker.publish(
             "inference.started",
@@ -468,6 +473,7 @@ class Router:
             planning_extra.pop("search_query", None)
             planning_extra.pop("search_skill", None)
             planning_extra.pop("strict_model", None)
+            planning_extra.pop("disable_backend_timeout", None)
             planning_request = self._request_with_extra(request, planning_extra)
             context = await self.model_manager.resolve(planning_request)
             client = await self._get_client()
@@ -535,6 +541,7 @@ class Router:
                     api_token=active_context.api_token,
                     client=client,
                     think=think_flag,
+                    disable_timeout=disable_backend_timeout,
                 )
                 return raw, active_context
 
@@ -781,6 +788,7 @@ class Router:
         client: httpx.AsyncClient,
         api_token: str | None = None,
         think: bool = False,
+        disable_timeout: bool = False,
     ) -> dict[str, Any]:
         """POST to the provider's chat/completions endpoint."""
         if httpx is None:
@@ -797,11 +805,13 @@ class Router:
             think=think,
         )
         headers = {"Authorization": f"Bearer {api_token}"} if api_token else None
-        resp = await client.post(
-            Router._chat_url(provider),
-            json=payload,
-            headers=headers,
-        )
+        request_options: dict[str, Any] = {
+            "json": payload,
+            "headers": headers,
+        }
+        if disable_timeout:
+            request_options["timeout"] = None
+        resp = await client.post(Router._chat_url(provider), **request_options)
         if provider.name == "ollama" and getattr(resp, "status_code", None) == 404:
             options: dict[str, Any] = {}
             if temperature is not None:

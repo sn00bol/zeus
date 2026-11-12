@@ -65,6 +65,7 @@ class InMemoryDatabasePool:
         self._facts: list[InMemoryRecord] = []
         self._memory_counter = 1
         self._model_prefs: dict[str, InMemoryRecord] = {}
+        self._model_configuration: InMemoryRecord | None = None
         self._user_settings: dict[tuple[str, str], bool] = {}
         self._help_prefs: dict[str, Any] = {}
 
@@ -105,6 +106,21 @@ class InMemoryDatabasePool:
                         item for item in collection if item.get("expires_at", now) > now
                     ]
                 return f"DELETE {previous_count - len(collection)}"
+            if "INSERT INTO MODEL_CONFIGURATION" in q and len(args) >= 3:
+                provider_name, model_id, ollama_api_key = args[:3]
+                if self._model_configuration is None:
+                    self._model_configuration = InMemoryRecord({
+                        "setting_id": 1,
+                        "provider_name": provider_name,
+                        "model_id": model_id,
+                        "ollama_api_key": ollama_api_key,
+                    })
+                else:
+                    self._model_configuration["provider_name"] = provider_name
+                    self._model_configuration["model_id"] = model_id
+                    if ollama_api_key:
+                        self._model_configuration["ollama_api_key"] = ollama_api_key
+                return "INSERT 0 1"
             return "OK"
 
     async def fetchrow(self, query: str, *args: object) -> InMemoryRecord | None:
@@ -115,6 +131,13 @@ class InMemoryDatabasePool:
             # Health check ping
             if upper_q.rstrip("; ") == "SELECT 1":
                 return InMemoryRecord({"val": 1})
+
+            if "FROM MODEL_CONFIGURATION" in upper_q:
+                return (
+                    InMemoryRecord(self._model_configuration)
+                    if self._model_configuration is not None
+                    else None
+                )
 
             if "INSERT INTO CONVERSATION_MEMORIES" in upper_q and len(args) >= 5:
                 platform, user_id, conversation_id, content, retention_days = args[:5]
@@ -397,6 +420,27 @@ class DatabaseRouter:
         try:
             schema = schema_path.read_text(encoding="utf-8")
             await pool.execute(schema)
+            legacy_provider = os.environ.get("ZEUS_PROVIDER", "").strip() or None
+            legacy_model = os.environ.get("ZEUS_MODEL", "").strip() or None
+            legacy_api_key = (
+                os.environ.get("OLLAMA_API_KEY", "").strip()
+                or os.environ.get("OLLAMA_TOKEN", "").strip()
+                or None
+            )
+            if legacy_provider or legacy_model or legacy_api_key:
+                await pool.execute(
+                    """
+                    INSERT INTO model_configuration
+                        (setting_id, provider_name, model_id, ollama_api_key)
+                    VALUES (1, $1, $2, $3)
+                    ON CONFLICT (setting_id) DO NOTHING
+                    """,
+                    legacy_provider,
+                    legacy_model,
+                    legacy_api_key,
+                )
+            for key in ("ZEUS_PROVIDER", "ZEUS_MODEL", "OLLAMA_API_KEY", "OLLAMA_TOKEN"):
+                os.environ.pop(key, None)
         except Exception as exc:
             if self._allow_fallback:
                 log.warning("Could not execute PostgreSQL schema (%s). Falling back to in-memory.", exc)

@@ -84,14 +84,14 @@ const runtimeAgentConversationModule = defineInlineModule((require, module, expo
         throw new TypeError(`Unsupported conversation platform: ${platform}`);
     }
 
-    function getEnvironmentModelSelection(models) {
-        const configuredProvider = String(process.env.ZEUS_PROVIDER || '').trim().toLowerCase();
+    function getConfiguredModelSelection(models, configuration = {}) {
+        const configuredProvider = String(configuration.provider || '').trim().toLowerCase();
         if (configuredProvider && !PROVIDERS.has(configuredProvider)) {
             throw new Error(
-                `Unsupported ZEUS_PROVIDER '${configuredProvider}'. Choose ollama, lmstudio, or llamacpp.`,
+                `Unsupported configured provider '${configuredProvider}'. Choose ollama, lmstudio, or llamacpp.`,
             );
         }
-        const configuredModel = String(process.env.ZEUS_MODEL || '').trim();
+        const configuredModel = String(configuration.model || '').trim();
         const modelIsAutomatic = ['auto', 'automatic'].includes(configuredModel.toLowerCase());
 
         if (configuredModel && !modelIsAutomatic) {
@@ -102,8 +102,8 @@ const runtimeAgentConversationModule = defineInlineModule((require, module, expo
             if (!selected) {
                 const providerLabel = configuredProvider ? ` under '${configuredProvider}'` : '';
                 throw new Error(
-                    `ZEUS_MODEL '${configuredModel}'${providerLabel} is not available. `
-                    + 'Check ZEUS_MODEL and ZEUS_PROVIDER in .env.',
+                    `Configured model '${configuredModel}'${providerLabel} is not available. `
+                    + 'Check the model configuration in the database.',
                 );
             }
             return selected;
@@ -114,8 +114,8 @@ const runtimeAgentConversationModule = defineInlineModule((require, module, expo
             : models[0];
         if (!selected) {
             throw new Error(
-                `No models are available from ZEUS_PROVIDER '${configuredProvider}'. `
-                + 'Check that the provider is running and has a model loaded.',
+                `No models are available from configured provider '${configuredProvider}'. `
+                + 'Check the configured provider and verify that it has a model loaded.',
             );
         }
         return selected;
@@ -125,16 +125,19 @@ const runtimeAgentConversationModule = defineInlineModule((require, module, expo
         const preference = await database.getModelPreference(scopeId);
         if (preference?.provider && preference?.model) return preference;
 
-        const { models } = await requestJson('/models');
+        const [{ models }, configuration] = await Promise.all([
+            requestJson('/models'),
+            requestJson('/model-configuration'),
+        ]);
         if (!Array.isArray(models) || models.length === 0) {
             throw new Error(
                 'No AI models were discovered. Check that the selected provider is running, '
-                + 'ZEUS_PROVIDER and LLM_PORT are correct, and that LLM_HOST is reachable '
+                + 'LLM_PORT is correct, and that LLM_HOST is reachable '
                 + 'from the bot. With Docker Compose, use host.docker.internal for a provider '
                 + 'running on the host; Ollama must listen on a network-accessible interface.',
             );
         }
-        return getEnvironmentModelSelection(models);
+        return getConfiguredModelSelection(models, configuration);
     }
 
     async function waitForRun(runId) {
@@ -252,7 +255,7 @@ const runtimeAgentConversationModule = defineInlineModule((require, module, expo
 
     module.exports = {
         generateConversationReply,
-        getEnvironmentModelSelection,
+        getConfiguredModelSelection,
         getModelScope,
         selectModel,
         storeAssistantReply,
@@ -397,7 +400,7 @@ const chatThreadsModule = defineInlineModule((require, module, exports) => {
 
 const modelServiceModule = defineInlineModule((require, module, exports) => {
     const { requestJson } = require('./agentBridge');
-    const { getEnvironmentModelSelection } = require('./runtimeAgentConversation');
+    const { getConfiguredModelSelection } = require('./runtimeAgentConversation');
 
     const PROVIDERS = new Set(['ollama', 'lmstudio', 'llamacpp']);
 
@@ -410,9 +413,12 @@ const modelServiceModule = defineInlineModule((require, module, exports) => {
     }
 
     async function getAvailableModels(database, scopeId) {
-        const models = await fetchAvailableModels();
-        const preference = await database.getModelPreference(scopeId);
-        return { models, preference };
+        const [models, configuration, preference] = await Promise.all([
+            fetchAvailableModels(),
+            requestJson('/model-configuration'),
+            database.getModelPreference(scopeId),
+        ]);
+        return { models, configuration, preference };
     }
 
     async function setPreferredModel(database, scopeId, provider, model) {
@@ -434,7 +440,7 @@ const modelServiceModule = defineInlineModule((require, module, exports) => {
     }
 
     module.exports = {
-        getEnvironmentModelSelection,
+        getConfiguredModelSelection,
         getAvailableModels,
         setModelToAutomatic,
         setPreferredModel,
@@ -478,7 +484,7 @@ const statusSummaryModule = defineInlineModule((require, module, exports) => {
         const latest = status.agent?.last_result || {};
         const runtimeModel = status.model || {};
         const provider = session.provider || latest.provider
-            || runtimeModel.provider || process.env.ZEUS_PROVIDER || 'unknown';
+            || runtimeModel.provider || 'unknown';
         const model = session.model || latest.model || runtimeModel.model || 'no model loaded';
         const inputTokens = session.prompt_tokens ?? latest.prompt_tokens ?? 0;
         const outputTokens = session.completion_tokens ?? latest.completion_tokens ?? 0;

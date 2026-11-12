@@ -1,9 +1,9 @@
 # Environment variables
 
-ZEUS reads configuration from a `.env` file in the repository root. Start by
-copying `.env.example` to `.env`, then fill in the values for the platforms and
-model provider you use. Keep `.env` private; it contains database passwords,
-bot tokens, and potentially model API keys.
+ZEUS reads deployment configuration from a `.env` file in the repository
+root. Start by copying `.env.example` to `.env`, then fill in the values for
+the database and platforms you use. Keep `.env` private; it contains database
+passwords and bot tokens.
 
 ```text
 cp .env.example .env
@@ -16,11 +16,14 @@ In particular, `DB_PASSWORD` must be set before Compose can start PostgreSQL.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `ZEUS_PROVIDER` | unset | Preferred provider: `ollama`, `lmstudio`, or `llamacpp`. If unset, ZEUS selects a reachable provider. |
-| `ZEUS_MODEL` | unset | Preferred model ID. Leave empty to use the first model discovered by the selected provider. The WebUI can also select a model per conversation. |
 | `LLM_HOST` | provider-dependent | Hostname or IP address of the model server when running ZEUS directly on the host. |
 | `LLM_PORT` | provider-dependent | Port of the model server. If empty, the provider default is used. |
 | `ZEUS_LLM_HOST` | `host.docker.internal` | Hostname Compose assigns to `LLM_HOST` for the ZEUS container. Change it when the model server is not running on the Docker host (for example, use the Compose service name for another container). |
+
+Set the default provider (`ollama`, `lmstudio`, or `llamacpp`) and model with
+`python setup.py`. These settings are stored in PostgreSQL, not in `.env`.
+Leave the model selection automatic to use the first available model. The WebUI
+and platform adapters can also select a model per conversation or user.
 
 Provider default ports:
 
@@ -30,18 +33,18 @@ Provider default ports:
 | LM Studio | `1234` |
 | llama.cpp server | `8080` |
 
-`LLM_HOST` and `LLM_PORT` configure only the provider named by `ZEUS_PROVIDER`.
-Other providers use their provider-specific host and port variables (or their
-defaults), so model discovery does not query the selected provider's endpoint
-as if it belonged to every provider.
+`LLM_HOST` and `LLM_PORT` configure only the provider selected by
+`python setup.py`. Other providers use their provider-specific host and port
+variables (or their defaults), so model discovery does not query the selected
+provider's endpoint as if it belonged to every provider.
 
-### Model API keys
+### Ollama credentials
 
-| Variable | Description |
+| Setting | Description |
 | --- | --- |
-| `OLLAMA_API_KEY` / `OLLAMA_TOKEN` | Optional Ollama endpoint credential (e.g. for remote or authenticated Ollama servers). |
+| Ollama API key | Optional credential for remote or authenticated Ollama endpoints. Enter it in `python setup.py`; ZEUS stores it in PostgreSQL. |
 
-> Note: LM Studio and llama.cpp local providers do not require or support API keys, and generic model tokens are not required.
+> Note: LM Studio and llama.cpp local providers do not require or support API keys, and generic model tokens are not required. Legacy `OLLAMA_API_KEY` or `OLLAMA_TOKEN` values are imported into PostgreSQL once when an existing installation starts.
 
 ## WebUI
 

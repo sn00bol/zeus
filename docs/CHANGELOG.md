@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## Unreleased
+- Store the default provider, model, and Ollama API key in PostgreSQL instead of `.env`.
+- Disable request timeouts for WebUI conversation title generation.
+
 ## v1.1.0 - 11.14.2026
 Release note:
 
@@ -8,10 +12,10 @@ Release note:
 
 What changed:
 - Refactor entirely platform selection and remove 'PLATFORM' in `.env`, fix HTTP bugs ([d8db3c3](https://github.com/sn00bol/zeus/commit/d8db3c3fc67247e9fa8e26b28251885ea8f57c21))
-- Unify websocket manager, make more shorten name in ENV
+- Unify websocket manager
+- Move `MODEL`, `PROVIDER`, `OLLAMA API KEY` in `.env` into database
 - Allow to use search engine on platform
-- Add limit text on platform to prevent not fully display or send prompt too long at platform
-- Add supporting rendering for Telegram
-- Fix sidebar overlay
-- Fix model command on Discord/Telegram
+- Add limit text on platform to prevent not fully display or send prompt too long at platform ([9dbc515](https://github.com/sn00bol/zeus/commit/9dbc5154a63a071f5f9b51970c2942894f867c38))
+- Add supporting rendering for Telegram ([15ee1c6](https://github.com/sn00bol/zeus/commit/15ee1c67013f92f64db5f88d470d2807a28f0dd6))
+- Fix model command on Discord/Telegram ([15ee1c6](https://github.com/sn00bol/zeus/commit/15ee1c67013f92f64db5f88d470d2807a28f0dd6))
 - Fix only detect when select local model and ollama cloud model ([d8db3c3](https://github.com/sn00bol/zeus/commit/d8db3c3fc67247e9fa8e26b28251885ea8f57c21))

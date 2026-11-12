@@ -80,7 +80,6 @@ class ProviderEndpoint:
 
 
 def _resolve_provider_address(
-    provider_name: str,
     default_host: str,
     default_port: int,
     host_env: str,
@@ -88,14 +87,9 @@ def _resolve_provider_address(
     host: str | None,
     port: int | None,
 ) -> tuple[str, int]:
-    """Apply the generic LLM endpoint only to ZEUS_PROVIDER."""
-    use_shared_endpoint = (
-        os.environ.get("ZEUS_PROVIDER", "").strip().lower() == provider_name
-    )
-    configured_host = os.environ.get("LLM_HOST") if use_shared_endpoint else None
-    configured_port = os.environ.get("LLM_PORT") if use_shared_endpoint else None
-    resolved_host = host or configured_host or os.environ.get(host_env) or default_host
-    port_value = configured_port or os.environ.get(port_env)
+    """Resolve provider-specific environment defaults and explicit overrides."""
+    resolved_host = host or os.environ.get(host_env) or default_host
+    port_value = os.environ.get(port_env)
     resolved_port = port if port is not None else (
         default_port
         if not port_value or port_value.lower() == "default"

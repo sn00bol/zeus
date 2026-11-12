@@ -122,7 +122,7 @@ class HealthMonitor:
             start = time.perf_counter()
             try:
                 if self.model_manager is not None:
-                    provider = self.model_manager.get_provider(name)
+                    provider = await self.model_manager.provider_for(name)
                     is_online = await asyncio.wait_for(provider.ping(), timeout=3.0)
                 else:
                     is_online = False

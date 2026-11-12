@@ -88,8 +88,10 @@ class FakeMemoryDatabase:
         self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
         self.fetch_calls: list[tuple[str, tuple[object, ...]]] = []
 
-    async def fetchrow(self, query: str, *args: object) -> dict[str, int]:
+    async def fetchrow(self, query: str, *args: object) -> dict[str, int] | None:
         self.fetchrow_calls.append((query, args))
+        if "FROM model_configuration" in query:
+            return None
         return {"memory_id": 1}
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
@@ -101,6 +103,33 @@ class FakeMemoryDatabase:
     async def execute(self, query: str, *args: object) -> str:
         self.fetch_calls.append((query, args))
         return "DELETE 2" if "conversation_memories" in query else "DELETE 0"
+
+
+class FakeModelConfigurationDatabase:
+    def __init__(
+        self,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        ollama_api_key: str | None = None,
+    ) -> None:
+        self.configuration = {
+            "provider_name": provider,
+            "model_id": model,
+            "ollama_api_key": ollama_api_key,
+        }
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        if "FROM model_configuration" in query:
+            return self.configuration
+        if "FROM model_controls" in query:
+            return None
+        raise AssertionError(f"Unexpected query: {query}")
+
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "FROM model_controls" in query:
+            return []
+        raise AssertionError(f"Unexpected query: {query}")
 
 
 class FakeSearchClient:
@@ -249,10 +278,12 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_runtime_status_reports_configured_provider_and_loaded_model(self) -> None:
         provider = FakeProvider()
-        manager = ModelManager(provider_factory=lambda _: provider)
+        manager = ModelManager(
+            provider_factory=lambda _: provider,
+            database=FakeModelConfigurationDatabase(provider="ollama"),
+        )
 
-        with patch.dict(os.environ, {"ZEUS_PROVIDER": "ollama"}):
-            status = await manager.status()
+        status = await manager.status()
 
         self.assertEqual(status["provider"], "ollama")
         self.assertEqual(status["model"], "llama-test")
@@ -557,7 +588,13 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(name, "ollama")
             return provider
 
-        manager = ModelManager(provider_factory=provider_factory)
+        manager = ModelManager(
+            provider_factory=provider_factory,
+            database=FakeModelConfigurationDatabase(
+                provider="ollama",
+                ollama_api_key="test-secret",
+            ),
+        )
         request = SimpleNamespace(
             provider_name="ollama",
             model=None,
@@ -566,9 +603,8 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             max_tokens=None,
             session=None,
         )
-        with patch.dict(os.environ, {"OLLAMA_API_KEY": "test-secret"}):
-            first = await manager.resolve(request)
-            second = await manager.resolve(request)
+        first = await manager.resolve(request)
+        second = await manager.resolve(request)
 
         self.assertEqual(first.model_name, "llama-test")
         self.assertEqual(first.api_token, "test-secret")
@@ -581,9 +617,49 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
         await manager.resolve(request)
         self.assertEqual(provider.list_calls, 2)
 
+    async def test_model_configuration_bridge_response_never_includes_api_key(self) -> None:
+        responses: list[dict[str, object]] = []
+
+        async def send(event: dict[str, object]) -> None:
+            responses.append(event)
+
+        fake_router = SimpleNamespace(
+            model_manager=SimpleNamespace(
+                configuration=AsyncMock(return_value={
+                    "provider": "ollama",
+                    "model": "llama-test",
+                    "ollama_api_key": "do-not-return-this",
+                }),
+            ),
+        )
+        with (
+            patch.object(discord_bridge, "_router", fake_router),
+            patch.object(discord_bridge, "_BRIDGE_TOKEN", "test-bridge-token"),
+        ):
+            await discord_bridge.BridgeApplication()._http(
+                {
+                    "type": "http",
+                    "method": "GET",
+                    "path": "/model-configuration",
+                    "headers": [(b"authorization", b"Bearer test-bridge-token")],
+                },
+                AsyncMock(),
+                send,
+            )
+
+        payload = json.loads(responses[-1]["body"])
+        self.assertEqual(payload, {"provider": "ollama", "model": "llama-test"})
+        self.assertNotIn("do-not-return-this", responses[-1]["body"].decode("utf-8"))
+
     async def test_configured_model_is_used_when_request_has_no_model(self) -> None:
         provider = FakeProvider()
-        manager = ModelManager(provider_factory=lambda _: provider)
+        manager = ModelManager(
+            provider_factory=lambda _: provider,
+            database=FakeModelConfigurationDatabase(
+                provider="ollama",
+                model="configured-model",
+            ),
+        )
         request = SimpleNamespace(
             provider_name="ollama",
             model=None,
@@ -593,15 +669,20 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             session=None,
         )
 
-        with patch.dict(os.environ, {"ZEUS_MODEL": "configured-model"}):
-            context = await manager.resolve(request)
+        context = await manager.resolve(request)
 
         self.assertEqual(context.model_name, "configured-model")
         self.assertEqual(provider.list_calls, 0)
 
     async def test_automatic_model_setting_uses_runtime_discovery(self) -> None:
         provider = FakeProvider()
-        manager = ModelManager(provider_factory=lambda _: provider)
+        manager = ModelManager(
+            provider_factory=lambda _: provider,
+            database=FakeModelConfigurationDatabase(
+                provider="ollama",
+                model="automatic",
+            ),
+        )
         request = SimpleNamespace(
             provider_name="ollama",
             model=None,
@@ -611,8 +692,7 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
             session=None,
         )
 
-        with patch.dict(os.environ, {"ZEUS_MODEL": "automatic"}):
-            context = await manager.resolve(request)
+        context = await manager.resolve(request)
 
         self.assertEqual(context.model_name, "llama-test")
         self.assertEqual(provider.list_calls, 1)
@@ -778,6 +858,40 @@ class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(captured["url"], "http://localhost:11434/v1/chat/completions")
         self.assertEqual(captured["headers"], {"Authorization": "Bearer test-token"})
+
+    async def test_router_call_backend_can_disable_request_timeout(self) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {"choices": [{"message": {"content": "A title"}}]}
+
+        class FakeClient:
+            async def post(self, url: str, **kwargs: object) -> FakeResponse:
+                captured["url"] = url
+                captured.update(kwargs)
+                return FakeResponse()
+
+        await Router._call_backend(
+            provider=SimpleNamespace(
+                name="ollama",
+                endpoint=SimpleNamespace(base_url="http://localhost:11434"),
+            ),  # type: ignore[arg-type]
+            model_id="llama-test",
+            messages=[{"role": "user", "content": "Summarize this."}],
+            temperature=0.1,
+            max_tokens=64,
+            stream=False,
+            extra={},
+            client=FakeClient(),  # type: ignore[arg-type]
+            disable_timeout=True,
+        )
+
+        self.assertIn("timeout", captured)
+        self.assertIsNone(captured["timeout"])
 
 
     async def test_router_falls_back_to_native_ollama_chat_after_openai_endpoint_404(self) -> None:
@@ -1139,14 +1253,14 @@ class SessionManagerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ProviderEndpointConfigurationTests(unittest.TestCase):
-    def test_shared_endpoint_is_limited_to_configured_provider(self) -> None:
+    def test_shared_endpoint_is_not_read_directly_by_providers(self) -> None:
         with patch.dict(os.environ, {
             "ZEUS_PROVIDER": "ollama",
             "LLM_HOST": "ollama.example",
             "LLM_PORT": "11434",
         }, clear=True):
             self.assertEqual((OllamaProvider().host, OllamaProvider().port), (
-                "ollama.example",
+                "localhost",
                 11434,
             ))
             self.assertEqual((LMStudioProvider().host, LMStudioProvider().port), (
@@ -1158,17 +1272,32 @@ class ProviderEndpointConfigurationTests(unittest.TestCase):
                 8080,
             ))
 
+    def test_model_manager_applies_shared_endpoint_to_database_provider(self) -> None:
+        with patch.dict(os.environ, {
+            "LLM_HOST": "ollama.example",
+            "LLM_PORT": "11435",
+        }, clear=True):
+            manager = ModelManager(
+                database=FakeModelConfigurationDatabase(provider="ollama"),
+            )
+
+            async def get_provider() -> OllamaProvider:
+                return await manager.provider_for("ollama")  # type: ignore[return-value]
+
+            provider = asyncio.run(get_provider())
+
+        self.assertEqual((provider.host, provider.port), ("ollama.example", 11435))
+
     def test_provider_specific_endpoint_is_used_for_non_selected_provider(self) -> None:
         with patch.dict(os.environ, {
-            "ZEUS_PROVIDER": "lmstudio",
             "LLM_HOST": "lmstudio.example",
             "LLM_PORT": "1235",
             "OLLAMA_HOST": "ollama.example",
             "OLLAMA_PORT": "11435",
         }, clear=True):
             self.assertEqual((LMStudioProvider().host, LMStudioProvider().port), (
-                "lmstudio.example",
-                1235,
+                "localhost",
+                1234,
             ))
             self.assertEqual((OllamaProvider().host, OllamaProvider().port), (
                 "ollama.example",

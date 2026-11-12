@@ -39,9 +39,11 @@ function requestJson(path, { method = 'GET', body, timeoutMs = 10_000 } = {}) {
             });
         });
 
-        request.setTimeout(timeoutMs, () => {
-            request.destroy(new Error(`WebUI bridge request timed out after ${timeoutMs}ms.`));
-        });
+        if (timeoutMs > 0) {
+            request.setTimeout(timeoutMs, () => {
+                request.destroy(new Error(`WebUI bridge request timed out after ${timeoutMs}ms.`));
+            });
+        }
         request.on('error', reject);
         if (payload) request.write(payload);
         request.end();

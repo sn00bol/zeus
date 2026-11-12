@@ -193,6 +193,13 @@ class BridgeApplication:
         if method == "GET" and path == "/models":
             await _send_json(send, {"models": await _router.available_models()})
             return
+        if method == "GET" and path == "/model-configuration":
+            configuration = await _router.model_manager.configuration()
+            await _send_json(send, {
+                "provider": configuration["provider"],
+                "model": configuration["model"],
+            })
+            return
         if method == "GET" and path == "/status":
             query = parse_qs(scope.get("query_string", b"").decode("ascii", errors="replace"))
             platform = query.get("platform", ["telegram"])[0]

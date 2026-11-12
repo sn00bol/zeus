@@ -1,7 +1,7 @@
 const { getModelScope } = require('../Adapter').conversation;
 const { formatText, sendFormattedMessage } = require('../Adapter').formatter;
 const {
-    getEnvironmentModelSelection,
+    getConfiguredModelSelection,
     getAvailableModels,
     setModelToAutomatic,
     setPreferredModel,
@@ -53,13 +53,17 @@ module.exports = {
 
         try {
             if (action === 'list') {
-                const { models, preference: current } = await getAvailableModels(bot.db, scopeId);
+                const {
+                    models,
+                    configuration,
+                    preference: current,
+                } = await getAvailableModels(bot.db, scopeId);
                 if (!Array.isArray(models) || models.length === 0) {
                     await ctx.reply('No AI models are currently available. Check that your providers are running and have models loaded.');
                     return;
                 }
 
-                const configured = current ? null : getEnvironmentModelSelection(models);
+                const configured = current ? null : getConfiguredModelSelection(models, configuration);
                 const effective = current || configured;
                 const lines = models.map(item => {
                     const selected = effective?.provider === item.provider
@@ -68,7 +72,7 @@ module.exports = {
                 });
                 const mode = current?.provider
                     ? `Selected for this user: \`${current.provider}/${current.model}\``
-                    : `Default from .env: \`${effective.provider}/${effective.model}\``;
+                    : `Default configuration: \`${effective.provider}/${effective.model}\``;
                 const messages = createModelListMessages(lines, mode);
                 for (const message of messages) {
                     await sendFormattedMessage(ctx, message);
@@ -78,7 +82,7 @@ module.exports = {
 
             if (action === 'auto') {
                 await setModelToAutomatic(bot.db, scopeId);
-                await ctx.reply('The per-user model override was cleared. ZEUS will now follow ZEUS_PROVIDER and ZEUS_MODEL from .env.');
+                await ctx.reply('The per-user model override was cleared. ZEUS will now follow the default model configuration stored in the database.');
                 return;
             }
 

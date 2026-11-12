@@ -10,6 +10,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import core.database as database_module
 from core.database import DatabaseRouter, InMemoryDatabasePool
 from core.model import ModelManager
 from core.session import SessionStore
@@ -193,19 +194,52 @@ class RouterDispatcherTests(unittest.IsolatedAsyncioTestCase):
             messages=[Message(role="user", content="Summarize this conversation.")],
             provider_name="ollama",
             model="title-model",
+            platform="webui",
             temperature=0.1,
             max_tokens=48,
-            extra={"strict_model": True, "think": False},
+            extra={
+                "strict_model": True,
+                "think": False,
+                "disable_backend_timeout": True,
+            },
         ))
 
         self.assertEqual(result.provider, "ollama")
         self.assertEqual(result.model, "title-model")
         self.assertEqual(router._call_backend.await_count, 1)
         self.assertEqual(router._call_backend.await_args.kwargs["model_id"], "title-model")
+        self.assertTrue(router._call_backend.await_args.kwargs["disable_timeout"])
         self.assertEqual(router._call_backend.await_args.kwargs["extra"], {"think": False})
 
 
 class DatabaseInMemoryFallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_model_configuration_is_imported_once(self) -> None:
+        pool = AsyncMock()
+        database = DatabaseRouter(allow_fallback=False)
+        fake_asyncpg = SimpleNamespace(
+            create_pool=AsyncMock(return_value=pool),
+        )
+        with (
+            patch.object(database_module, "asyncpg", fake_asyncpg),
+            patch.dict(os.environ, {
+                "DB_PASSWORD": "test-db-password",
+                "ZEUS_PROVIDER": "ollama",
+                "ZEUS_MODEL": "llama-test",
+                "OLLAMA_API_KEY": "test-ollama-key",
+            }, clear=True),
+        ):
+            await database.initialize()
+            self.assertNotIn("ZEUS_PROVIDER", os.environ)
+            self.assertNotIn("ZEUS_MODEL", os.environ)
+            self.assertNotIn("OLLAMA_API_KEY", os.environ)
+
+        migration_call = pool.execute.await_args_list[1]
+        self.assertEqual(
+            migration_call.args[1:],
+            ("ollama", "llama-test", "test-ollama-key"),
+        )
+        await database.close()
+
     async def test_in_memory_fallback_sessions_and_messages(self) -> None:
         db = DatabaseRouter(allow_fallback=True)
         # Force fallback mode
@@ -286,25 +320,6 @@ class RouterApiManagerTests(unittest.IsolatedAsyncioTestCase):
         code, data = await api.handle_models()
         self.assertEqual(code, 200)
         self.assertEqual(data["providers"], ["ollama"])
-
-
-class ProviderTokenResolutionTests(unittest.TestCase):
-    def test_ollama_token_resolved(self) -> None:
-        with patch.dict(os.environ, {"OLLAMA_API_KEY": "ollama_secret_key"}, clear=False):
-            token = ModelManager.get_access_token("ollama")
-            self.assertEqual(token, "ollama_secret_key")
-
-    def test_unsupported_provider_tokens_ignored(self) -> None:
-        with patch.dict(os.environ, {
-            "LMSTUDIO_API_KEY": "lm_key",
-            "LLAMACPP_API_KEY": "llama_key",
-            "ZEUS_MODEL_TOKEN": "model_token",
-        }, clear=False):
-            # LM Studio and llama.cpp should not return tokens
-            self.assertIsNone(ModelManager.get_access_token("lmstudio"))
-            self.assertIsNone(ModelManager.get_access_token("llamacpp"))
-            # Generic token for unknown provider should also be None
-            self.assertIsNone(ModelManager.get_access_token("custom"))
 
 
 if __name__ == "__main__":

@@ -96,6 +96,15 @@ CREATE TABLE IF NOT EXISTS model_preferences (
     CHECK ((provider_name IS NULL AND model_id IS NULL)
         OR (provider_name IS NOT NULL AND model_id IS NOT NULL))
 );
+
+CREATE TABLE IF NOT EXISTS model_configuration (
+    setting_id SMALLINT PRIMARY KEY CHECK (setting_id = 1),
+    provider_name TEXT,
+    model_id TEXT,
+    ollama_api_key TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 DELETE FROM model_preferences
 WHERE provider_name LIKE 'external:%';
 

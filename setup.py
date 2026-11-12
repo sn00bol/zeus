@@ -125,7 +125,7 @@ def update_env(
         else:
             result.append(line)
     for key, value in values.items():
-        if key not in updated:
+        if key not in updated and key not in remove_keys:
             result.append(f"{key}={value}")
     path.write_text("\n".join(result) + "\n", encoding="utf-8")
 
@@ -134,6 +134,9 @@ def save_platform_settings(
     root: Path,
     platform_selection: str,
     config: dict[str, str],
+    *,
+    save_platforms: bool = True,
+    save_model_configuration: bool = True,
 ) -> None:
     async def save() -> None:
         import asyncpg
@@ -148,16 +151,36 @@ def save_platform_settings(
         try:
             schema = (root / "database" / "schema.sql").read_text(encoding="utf-8")
             await connection.execute(schema)
-            selected = set(_normalize_platform_selection(platform_selection).split(","))
-            await connection.executemany(
-                """
-                INSERT INTO platform_settings (platform, enabled, updated_at)
-                VALUES ($1, $2, NOW())
-                ON CONFLICT (platform) DO UPDATE
-                SET enabled = EXCLUDED.enabled, updated_at = NOW()
-                """,
-                [(name, name in selected) for name in ("webui", "discord", "telegram")],
-            )
+            if save_model_configuration:
+                await connection.execute(
+                    """
+                    INSERT INTO model_configuration
+                        (setting_id, provider_name, model_id, ollama_api_key, updated_at)
+                    VALUES (1, $1, $2, NULLIF($3, ''), NOW())
+                    ON CONFLICT (setting_id) DO UPDATE
+                    SET provider_name = EXCLUDED.provider_name,
+                        model_id = EXCLUDED.model_id,
+                        ollama_api_key = COALESCE(
+                            EXCLUDED.ollama_api_key,
+                            model_configuration.ollama_api_key
+                        ),
+                        updated_at = NOW()
+                    """,
+                    config.get("ZEUS_PROVIDER") or None,
+                    config.get("ZEUS_MODEL") or None,
+                    config.get("OLLAMA_API_KEY", ""),
+                )
+            if save_platforms:
+                selected = set(_normalize_platform_selection(platform_selection).split(","))
+                await connection.executemany(
+                    """
+                    INSERT INTO platform_settings (platform, enabled, updated_at)
+                    VALUES ($1, $2, NOW())
+                    ON CONFLICT (platform) DO UPDATE
+                    SET enabled = EXCLUDED.enabled, updated_at = NOW()
+                    """,
+                    [(name, name in selected) for name in ("webui", "discord", "telegram")],
+                )
         finally:
             await connection.close()
 
@@ -464,6 +487,10 @@ def setup_project(
             print_warning("No .env.example found. Created empty .env file.")
 
     existing = read_env(env_path)
+    has_existing_model_configuration = any(
+        existing.get(key)
+        for key in ("ZEUS_PROVIDER", "ZEUS_MODEL", "OLLAMA_API_KEY", "OLLAMA_TOKEN")
+    )
     preserve_platform_settings = (
         existing.get("CIG") == "true"
         and "PLATFORM" not in existing
@@ -482,7 +509,9 @@ def setup_project(
             "ZEUS_MODEL": existing.get("ZEUS_MODEL", ""),
             "LLM_HOST": existing.get("LLM_HOST", "localhost"),
             "LLM_PORT": existing.get("LLM_PORT", "11434"),
-            "OLLAMA_API_KEY": existing.get("OLLAMA_API_KEY", ""),
+            "OLLAMA_API_KEY": (
+                existing.get("OLLAMA_API_KEY") or existing.get("OLLAMA_TOKEN", "")
+            ),
             "DB_HOST": existing.get("DB_HOST", "127.0.0.1"),
             "DB_PORT": existing.get("DB_PORT", "5432"),
             "DB_NAME": existing.get("DB_NAME", "zeus"),
@@ -540,7 +569,7 @@ def setup_project(
             input_fn,
         )
 
-        ollama_token = existing.get("OLLAMA_API_KEY", "")
+        ollama_token = existing.get("OLLAMA_API_KEY") or existing.get("OLLAMA_TOKEN", "")
         if provider == "ollama":
             default_hint = f" [{ollama_token[:6]}...]" if ollama_token else ""
             ollama_input = prompt(f"Ollama API Token (optional, press Enter to skip){default_hint}: ").strip()
@@ -586,7 +615,20 @@ def setup_project(
 
         config["CIG"] = "true"
 
-    update_env(env_path, config, remove_keys={"PLATFORM"})
+    model_configuration_keys = {
+        "ZEUS_PROVIDER",
+        "ZEUS_MODEL",
+        "OLLAMA_API_KEY",
+        "OLLAMA_TOKEN",
+    }
+    update_env(
+        env_path,
+        {
+            key: value for key, value in config.items()
+            if key not in model_configuration_keys
+        },
+        remove_keys={"PLATFORM"},
+    )
     print_success("Configuration saved to .env")
 
     # Dependency Installation
@@ -594,16 +636,25 @@ def setup_project(
     run_with_spinner(npm_install_command(), cwd=root, desc="Installing Node.js dependencies")
     run_with_spinner([sys.executable, "-m", "pip", "install", "."], cwd=root, desc="Installing Python packages")
     if preserve_platform_settings:
-        print_info("Keeping the existing platform selection stored in PostgreSQL.")
-    else:
-        save_platform_settings(root, platform, config)
-        print_success("Platform selection saved to PostgreSQL")
+        print_info("Keeping the existing selection stored in PostgreSQL.")
+    save_platform_settings(
+        root,
+        platform,
+        config,
+        save_platforms=not preserve_platform_settings,
+        save_model_configuration=(
+            not preserve_platform_settings or has_existing_model_configuration
+        ),
+    )
+    update_env(env_path, {}, remove_keys=model_configuration_keys)
+    if not preserve_platform_settings:
+        print_success("Selection saved to PostgreSQL.")
     if "telegram" in platform.split(","):
         print_warning("Telegram support is currently in preview and testing")
 
     # Summary
     print(f"\n{Colors.GREEN}{Colors.BOLD}🎉 ZEUS Setup Complete!{Colors.RESET}")
-    print(f"To run ZEUS, use {Colors.BOLD}{Colors.YELLOW}python app.py{Colors.RESET}\n")
+    print(f"To run ZEUS, use {Colors.BOLD}{Colors.YELLOW}docker compose up -d --build{Colors.RESET}\n")
 
     return config
 

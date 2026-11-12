@@ -1,5 +1,5 @@
 const {
-    getEnvironmentModelSelection,
+    getConfiguredModelSelection,
     getAvailableModels,
     setModelToAutomatic,
     setPreferredModel,
@@ -74,7 +74,7 @@ module.exports = {
             const user = context.user || context.author;
             const scopeId = getModelScope(context.guildId || context.guild?.id, user.id);
             if (action === 'list') {
-                const { models, preference: current } = await getAvailableModels(
+                const { models, configuration, preference: current } = await getAvailableModels(
                     context.client.db,
                     scopeId,
                 );
@@ -82,7 +82,7 @@ module.exports = {
                     await replyToCommand(context, 'No AI models are currently available. Check that your providers are running and have models loaded.');
                     return;
                 }
-                const configured = current ? null : getEnvironmentModelSelection(models);
+                const configured = current ? null : getConfiguredModelSelection(models, configuration);
                 const effective = current || configured;
                 const lines = models.map(item => {
                     const selected = effective?.provider === item.provider
@@ -91,7 +91,7 @@ module.exports = {
                 });
                 const mode = current?.provider
                     ? `Selected for this server/user: \`${current.provider}/${current.model}\``
-                    : `Default from .env: \`${effective.provider}/${effective.model}\``;
+                    : `Default configuration: \`${effective.provider}/${effective.model}\``;
                 const messages = createModelListMessages(
                     lines,
                     `${mode}\nSet: \`/model set\` · Auto: \`/model auto\``,
@@ -104,7 +104,7 @@ module.exports = {
 
             if (action === 'auto') {
                 await setModelToAutomatic(context.client.db, scopeId);
-                await replyToCommand(context, 'The per-server/user model override was cleared. ZEUS will now follow ZEUS_PROVIDER and ZEUS_MODEL from .env.');
+                await replyToCommand(context, 'The per-server/user model override was cleared. ZEUS will now follow the default model configuration stored in the database.');
                 return;
             }
 

@@ -40,7 +40,7 @@ function createTitleGenerationService({ request = requestJson } = {}) {
 
         const response = await request('/infer', {
             method: 'POST',
-            timeoutMs: 15_000,
+            timeoutMs: 0,
             body: {
                 messages: [
                     { role: 'system', content: TITLE_SYSTEM_PROMPT },
@@ -56,6 +56,7 @@ function createTitleGenerationService({ request = requestJson } = {}) {
                 platform: 'webui',
                 think: false,
                 strict_model: hasProvider,
+                disable_backend_timeout: true,
             },
         });
         return normalizeGeneratedTitle(response?.content);
