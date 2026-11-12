@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v1.0.0 - 11.08.2026
+## v1.1.0 - 11.14.2026
 Release note:
 
 1. This version currently work stable on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb"
@@ -10,7 +10,7 @@ What changed:
 - Refactor entirely platform selection and remove 'PLATFORM' in `.env`, fix HTTP bugs ([d8db3c3](https://github.com/sn00bol/zeus/commit/d8db3c3fc67247e9fa8e26b28251885ea8f57c21))
 - Unify websocket manager, make more shorten name in ENV
 - Allow to use search engine on platform
-- Add limit text on platform to prevent not fully display or send prompt too long, and platform have max token
+- Add limit text on platform to prevent not fully display or send prompt too long at platform
 - Add supporting rendering for Telegram
 - Fix sidebar overlay
 - Fix model command on Discord/Telegram

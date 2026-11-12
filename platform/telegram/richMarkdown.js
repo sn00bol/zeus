@@ -1,4 +1,8 @@
 const MarkdownIt = require('markdown-it');
+const {
+    PLATFORM_MESSAGE_MAX_LENGTH,
+    splitText,
+} = require('../messageChunks');
 
 const markdown = new MarkdownIt({
     breaks: true,
@@ -174,19 +178,7 @@ function closingTags(stack) {
     return stack.slice().reverse().map(tag => `</${tag.name}>`).join('');
 }
 
-function splitText(text, maxLength) {
-    if (text.length <= maxLength) return text.length;
-    let end = maxLength;
-    if (end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1;
-
-    const minimumBreak = Math.floor(end * 0.6);
-    const newline = text.lastIndexOf('\n', end - 1);
-    const whitespace = Math.max(newline, text.lastIndexOf(' ', end - 1));
-    if (whitespace >= minimumBreak) end = whitespace + 1;
-    return Math.max(1, end);
-}
-
-function splitFormattedText(formatted, maxLength = 4096) {
+function splitFormattedText(formatted, maxLength = PLATFORM_MESSAGE_MAX_LENGTH) {
     if (!Number.isInteger(maxLength) || maxLength < 32) {
         throw new RangeError('Telegram message limit must be an integer of at least 32.');
     }

@@ -63,6 +63,8 @@ const agentBridgeModule = defineInlineModule((require, module, exports) => {
     module.exports = { requestJson };
 }, {});
 
+const messageChunksModule = require('../messageChunks');
+
 const runtimeAgentConversationModule = defineInlineModule((require, module, exports) => {
     const { requestJson } = require('./agentBridge');
 
@@ -277,28 +279,21 @@ const agentConversationModule = defineInlineModule((require, module, exports) =>
 
 const chatThreadsModule = defineInlineModule((require, module, exports) => {
     const { ChannelType } = require('discord.js');
+    const { splitMessage } = require('../messageChunks');
     const {
         generateConversationReply,
         storeAssistantReply,
     } = require('./agentConversation');
 
-    const MAX_REPLY_LENGTH = 1_900;
-
     function formatAgentResponse(result) {
-        const content = result.content.length > MAX_REPLY_LENGTH
-            ? `${result.content.slice(0, MAX_REPLY_LENGTH - 3)}...`
-            : result.content;
+        const content = String(result.content || '');
         const thinking = String(result.thinking || '').trim();
-        if (!thinking || content.length >= MAX_REPLY_LENGTH - 12) return content;
+        if (!thinking) return content;
 
-        const prefix = '||💭 ';
-        const suffix = '||\n\n';
-        const budget = MAX_REPLY_LENGTH - content.length - prefix.length - suffix.length;
-        if (budget <= 0) return content;
-        const excerpt = thinking.length > budget
-            ? `${thinking.slice(0, budget - 1)}…`
+        const excerpt = thinking.length > 1_000
+            ? `${thinking.slice(0, 999)}…`
             : thinking;
-        return `${prefix}${excerpt}${suffix}${content}`;
+        return `||💭 ${excerpt}||\n\n${content}`;
     }
 
     function getPromptWithoutBotMention(message, botId) {
@@ -325,7 +320,10 @@ const chatThreadsModule = defineInlineModule((require, module, exports) => {
                 onQueued,
             });
             const response = formatAgentResponse(result);
-            const sentMessage = await channel.send(response);
+            let sentMessage;
+            for (const chunk of splitMessage(response)) {
+                sentMessage = await channel.send(chunk);
+            }
             try {
                 await storeAssistantReply(client, {
                     conversationId: channel.id,
@@ -390,8 +388,12 @@ const chatThreadsModule = defineInlineModule((require, module, exports) => {
         formatAgentResponse,
         getPromptWithoutBotMention,
         respondInChatThread,
+        splitMessage,
     };
-}, {'./agentConversation': agentConversationModule});
+}, {
+    '../messageChunks': messageChunksModule,
+    './agentConversation': agentConversationModule,
+});
 
 const modelServiceModule = defineInlineModule((require, module, exports) => {
     const { requestJson } = require('./agentBridge');

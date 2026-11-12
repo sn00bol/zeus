@@ -3,7 +3,7 @@ const {
     generateConversationReply,
     storeAssistantReply,
 } = require('../Adapter').conversation;
-const { formatAgentResponse } = require('../Adapter').chatThreads;
+const { formatAgentResponse, splitMessage } = require('../Adapter').chatThreads;
 
 function getPrompt(context, args) {
     if (context.isChatInputCommand?.()) {
@@ -42,7 +42,10 @@ module.exports = {
                 prompt,
             });
             const response = formatAgentResponse(result);
-            const sentMessage = await replyToCommand(context, response);
+            let sentMessage;
+            for (const chunk of splitMessage(response)) {
+                sentMessage = await replyToCommand(context, chunk);
+            }
             try {
                 await storeAssistantReply(context.client, {
                     conversationId,
