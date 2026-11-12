@@ -44,7 +44,7 @@ module.exports = {
     async execute(bot, ctx, args = []) {
         const action = (args[0] || 'list').toLowerCase();
         const userId = String(ctx.from.id);
-        const scopeId = getModelScope('telegram', null, userId);
+        const scopeId = getModelScope(userId);
 
         if (!ACTIONS.has(action)) {
             await ctx.reply('Use /model list, /model set <provider> <model>, or /model auto.');
@@ -82,7 +82,7 @@ module.exports = {
                 return;
             }
 
-            const provider = (args[1] || '').toLowerCase();
+            const provider = (args[1] || '').trim().toLowerCase();
             const model = args.slice(2).join(' ').trim();
             if (!model) {
                 await ctx.reply('Provide a supported provider and exact model ID. Example: /model set ollama llama3');

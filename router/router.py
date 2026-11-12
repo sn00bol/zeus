@@ -57,6 +57,8 @@ from router.security import SecurityManager, get_security_manager
 
 log = logging.getLogger(__name__)
 
+BACKEND_RESPONSE_TIMEOUT_SECONDS = 600
+
 # ---------------------------------------------------------------------------
 # Request / Response contracts
 # ---------------------------------------------------------------------------
@@ -172,7 +174,7 @@ class Router:
         """Return a shared AsyncClient to reuse TCP connections."""
         if self._http_client is None or self._http_client.is_closed:
             self._http_client = httpx.AsyncClient(
-                timeout=120,
+                timeout=httpx.Timeout(120, read=BACKEND_RESPONSE_TIMEOUT_SECONDS),
                 limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
             )
         return self._http_client

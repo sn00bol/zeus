@@ -10,6 +10,8 @@ function defineInlineModule(factory, dependencies = {}) {
     return module.exports;
 }
 
+const richMarkdownModule = require('./richMarkdown');
+
 const agentBridgeModule = defineInlineModule((require, module, exports) => {
     const http = require('node:http');
     const https = require('node:https');
@@ -276,74 +278,40 @@ const agentConversationModule = defineInlineModule((require, module, exports) =>
 }, {'./runtimeAgentConversation': runtimeAgentConversationModule});
 
 const formatterModule = defineInlineModule((require, module, exports) => {
-    /**
-     * Formatting utilities for Telegram
-     */
-
-    function formatText(text) {
-        if (!text) return '';
-        
-        // IMPORTANT: Escape HTML special characters first to prevent "can't parse entities" errors
-        let formatted = text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-
-        // Convert Discord-style Markdown to Telegram-style HTML
-        // 1. Bold: **text** -> <b>text</b>
-        formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
-        
-        // 2. Inline code: `text` -> <code>text</code>
-        formatted = formatted.replace(/`(.*?)`/g, '<code>$1</code>');
-        
-        // 3. Block code: ```lang\ntext\n``` -> <pre>text</pre>
-        formatted = formatted.replace(/```(\w*)\n?([\s\S]*?)\n?```/g, '<pre>$2</pre>');
-        
-        // 4. Italic: *text* or _text_ -> <i>text</i>
-        formatted = formatted.replace(/\*(.*?)\*/g, '<i>$1</i>');
-        formatted = formatted.replace(/_(.*?)_/g, '<i>$1</i>');
-        
-        return formatted;
-    }
+    const { formatText, splitFormattedText } = require('./richMarkdown');
 
     async function sendFormattedMessage(ctx, text, isAlreadyFormatted = false) {
         const formattedText = isAlreadyFormatted ? text : formatText(text);
-        return await ctx.reply(formattedText, { parse_mode: 'HTML' });
+        const chunks = splitFormattedText(formattedText);
+        let sentMessage;
+        for (const chunk of chunks) {
+            sentMessage = await ctx.reply(chunk, { parse_mode: 'HTML' });
+        }
+        return sentMessage;
     }
 
     module.exports = {
         formatText,
+        splitFormattedText,
         sendFormattedMessage,
     };
-}, {});
+}, {'./richMarkdown': richMarkdownModule});
 
 const chatThreadsModule = defineInlineModule((require, module, exports) => {
     const {
         generateConversationReply,
         storeAssistantReply,
     } = require('./agentConversation');
-    const { formatText } = require('./formatter');
-
-    const MAX_REPLY_LENGTH = 4096;
+    const { formatText, splitFormattedText } = require('./formatter');
 
     function formatAgentResponse(result) {
-        let content = formatText(result.content);
-        if (content.length > MAX_REPLY_LENGTH) {
-            content = content.slice(0, MAX_REPLY_LENGTH - 3) + '...';
-        }
-
+        const content = formatText(result.content);
         const thinking = String(result.thinking || '').trim();
-        if (!thinking || content.length >= MAX_REPLY_LENGTH - 40) return content;
-
-        const prefix = '<blockquote expandable>💭 ';
-        const suffix = '</blockquote>\n\n';
-        const budget = MAX_REPLY_LENGTH - content.length - prefix.length - suffix.length;
-        let excerpt = thinking.slice(0, Math.max(0, budget - 16));
-        while (excerpt && formatText(excerpt).length > budget) {
-            excerpt = excerpt.slice(0, -1);
-        }
-        if (!excerpt) return content;
-        return `${prefix}${formatText(excerpt)}${suffix}${content}`;
+        if (!thinking) return content;
+        const excerpt = thinking.length > 1_000
+            ? `${thinking.slice(0, 999)}…`
+            : thinking;
+        return `<blockquote expandable>💭 ${formatText(excerpt)}</blockquote>\n\n${content}`;
     }
 
     async function respondToUser(
@@ -364,8 +332,11 @@ const chatThreadsModule = defineInlineModule((require, module, exports) => {
             });
 
             const response = formatAgentResponse(result);
-
-            const sentMessage = await ctx.reply(response, { parse_mode: 'HTML' });
+            const chunks = splitFormattedText(response);
+            let sentMessage;
+            for (const chunk of chunks) {
+                sentMessage = await ctx.reply(chunk, { parse_mode: 'HTML' });
+            }
 
             try {
                 await storeAssistantReply(client, {
@@ -415,13 +386,20 @@ const modelServiceModule = defineInlineModule((require, module, exports) => {
     }
 
     async function setPreferredModel(database, scopeId, provider, model) {
-        const normalizedProvider = String(provider || '').toLowerCase();
-        if (!PROVIDERS.has(normalizedProvider) || !model) {
+        const normalizedProvider = String(provider || '').trim().toLowerCase();
+        const normalizedModel = String(model || '').trim();
+        if (!PROVIDERS.has(normalizedProvider) || !normalizedModel) {
             return { selected: null, reason: 'invalid-selection' };
         }
 
         const models = await fetchAvailableModels();
-        const selected = models.find(item => item.provider === normalizedProvider && item.model === model);
+        const selectedModel = models.find(item => (
+            String(item.provider || '').trim().toLowerCase() === normalizedProvider
+            && String(item.model || '').trim() === normalizedModel
+        ));
+        const selected = selectedModel
+            ? { ...selectedModel, provider: normalizedProvider, model: normalizedModel }
+            : null;
         if (!selected) return { selected: null, reason: 'model-not-found' };
 
         await database.setModelPreference(scopeId, selected.provider, selected.model);

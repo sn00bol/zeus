@@ -121,6 +121,17 @@ class FakeSearchClient:
 
 
 class ModelManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_router_client_allows_slow_backend_responses(self) -> None:
+        router = Router.__new__(Router)
+        router._http_client = None
+
+        client = await router._get_client()
+        try:
+            self.assertEqual(client.timeout.read, 600)
+            self.assertEqual(client.timeout.connect, 120)
+        finally:
+            await client.aclose()
+
     def test_model_capability_detection_uses_metadata_and_known_ids(self) -> None:
         self.assertTrue(detect_supports_vision(
             "unknown-model",

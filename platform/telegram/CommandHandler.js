@@ -200,7 +200,9 @@ const commandHandlerModule = defineInlineModule((require, module, exports) => {
 
     function registerCommandHandlers(bot, state, activeCommands) {
         const executeCommand = (command, ctx, commandText) => {
-            const args = commandText.trim().split(/\s+/).slice(1);
+            const args = Array.isArray(ctx.args)
+                ? ctx.args
+                : commandText.trim().split(/\s+/).slice(1);
             const commandPromise = Promise.resolve()
                 .then(() => command.execute(bot, ctx, args, state, activeCommands))
                 .catch(async error => {
@@ -401,9 +403,10 @@ const lifecycleHandlerModule = defineInlineModule((require, module, exports) => 
     function registerShutdownHandlers(options) {
         return registerSharedShutdownHandlers({
             ...options,
+            client: options.bot,
             platform: 'TELEGRAM',
             stopClient: bot => {
-                if (bot.polling || bot.webhookServer) bot.stop();
+                if (bot && (bot.polling || bot.webhookServer)) bot.stop();
             },
         });
     }
