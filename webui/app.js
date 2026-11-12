@@ -8,7 +8,7 @@ const ROOT = path.join(__dirname, '..');
 require('dotenv').config({ path: path.join(ROOT, '.env') });
 
 const database = require('../core/database');
-const { requestJson, requestSse } = require('./bridge');
+const { requestJson, requestSse, close: closeBridge } = require('./bridge');
 const { StreamManager } = require('./streamManager');
 const { createTitleGenerationService } = require('./js/title');
 
@@ -925,9 +925,11 @@ function pythonExecutable() {
 
 async function ensureBridge() {
     const webUiPort = Number(process.env.WEBUI_PORT) || 3000;
-    const bridgePort = Number(process.env.WEBUI_BRIDGE_PORT) || 5002;
+    const bridgePort = Number(
+        process.env.BRIDGE_PORT || process.env.WEBUI_BRIDGE_PORT,
+    ) || 5002;
     if (!process.env.WEBUI_BRIDGE_URL && webUiPort === bridgePort) {
-        throw new Error('WEBUI_PORT and WEBUI_BRIDGE_PORT must be different.');
+        throw new Error('WEBUI_PORT and the central bridge port must be different.');
     }
     try {
         await requestJson('/health', { timeoutMs: 1_000 });
@@ -936,7 +938,7 @@ async function ensureBridge() {
         if (process.env.WEBUI_BRIDGE_URL) {
             throw new Error(`Configured WebUI inference bridge is unavailable: ${error.message}`);
         }
-        const child = spawn(pythonExecutable(), ['-m', 'src.webui_bridge'], {
+        const child = spawn(pythonExecutable(), ['-m', 'src.websocket'], {
             cwd: ROOT,
             env: process.env,
             stdio: 'inherit',
@@ -978,6 +980,7 @@ async function start() {
         shuttingDown = true;
         server.close(async error => {
             if (error) console.error('[WEBUI] Could not close HTTP server:', error);
+            closeBridge();
             if (bridgeProcess && bridgeProcess.exitCode === null) bridgeProcess.kill();
             try {
                 await database.close();

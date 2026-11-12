@@ -1,6 +1,7 @@
 httpx
 httpcore
 uvicorn
+websockets
 python-dotenv
 asyncpg
 numpy

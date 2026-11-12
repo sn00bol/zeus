@@ -351,6 +351,7 @@ def run_platforms(
         process_environment = _host_environment()
 
     port = _configured_port("BRIDGE_PORT", 5000)
+    process_environment["BRIDGE_PORT"] = str(port)
     bridge: subprocess.Popen[str] | None = None
     bots: dict[str, subprocess.Popen[str]] = {}
     bot_commands: dict[str, list[str]] = {}
@@ -393,9 +394,11 @@ def run_platforms(
                                   encoding="utf-8", errors="replace", bufsize=1)
         # One bridge serves all selected bots; platform requests carry their own platform.
         bridge_platform = "discord" if "discord" in names else names[0]
+        bridge_environment = process_environment.copy()
+        bridge_environment["ZEUS_BRIDGE_PLATFORM"] = bridge_platform
         bridge = subprocess.Popen(
-            [sys.executable, "-m", f"src.{bridge_platform}_bridge"],
-            env=process_environment,
+            [sys.executable, "-m", "src.websocket"],
+            env=bridge_environment,
             **bridge_options,
         )
         if recorder and bridge.stdout:

@@ -37,6 +37,7 @@ from src.bridge_security import (
 )
 from router.agent import AgentQueueFull, AgentRunner
 from router.router import InferenceRequest, InferenceResponse, Message, Router
+from src.websocket import MAX_WEBSOCKET_MESSAGE_BYTES, websocket_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -153,6 +154,8 @@ class BridgeApplication:
             await self._lifespan(receive, send)
         elif scope["type"] == "http":
             await self._http(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await websocket_manager.handle(scope, receive, send, self._http)
 
     async def _lifespan(self, receive: Any, send: Any) -> None:
         while True:
@@ -402,7 +405,13 @@ def create_app() -> BridgeApplication:
 def main() -> None:
     if uvicorn is None:
         raise RuntimeError("uvicorn is required: install the project requirements")
-    uvicorn.run(create_app(), host=_BRIDGE_HOST, port=_BRIDGE_PORT, log_config=None)
+    uvicorn.run(
+        create_app(),
+        host=_BRIDGE_HOST,
+        port=_BRIDGE_PORT,
+        log_config=None,
+        ws_max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+    )
 
 
 if __name__ == "__main__":

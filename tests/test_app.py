@@ -144,7 +144,12 @@ class ManagedDatabaseTests(unittest.TestCase):
         self.assertEqual(popen.call_count, 3)
         self.assertEqual(
             popen.call_args_list[0].args[0],
-            [app.sys.executable, "-m", "src.discord_bridge"],
+            [app.sys.executable, "-m", "src.websocket"],
+        )
+        self.assertEqual(popen.call_args_list[0].kwargs["env"]["BRIDGE_PORT"], "5000")
+        self.assertEqual(
+            popen.call_args_list[0].kwargs["env"]["ZEUS_BRIDGE_PLATFORM"],
+            "discord",
         )
         self.assertEqual(
             [call.args[0][-1] for call in popen.call_args_list[1:]],

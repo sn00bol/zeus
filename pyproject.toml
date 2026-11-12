@@ -16,6 +16,7 @@ dependencies = [
     "httpx",
     "python-dotenv",
     "uvicorn",
+    "websockets",
 ]
 classifiers = [
     "Development Status :: Experiment",

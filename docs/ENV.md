@@ -53,11 +53,12 @@ provider's endpoint as if it belonged to every provider.
 | `WEBUI_HOST` | `127.0.0.1` | WebUI bind address when running directly on the host. Compose sets this to `0.0.0.0` inside its container so the published port is reachable. |
 | `WEBUI_PORT` | `3000` | WebUI HTTP port. Compose publishes it on host loopback (`127.0.0.1`). |
 | `WEBUI_BRIDGE_HOST` | `127.0.0.1` | Bind address for the private Python inference bridge used by the Node WebUI. |
-| `WEBUI_BRIDGE_PORT` | `5002` | Port for the private WebUI inference bridge. Keep it different from `WEBUI_PORT`. |
-| `WEBUI_BRIDGE_URL` | unset | Optional URL for an independently managed WebUI inference bridge. When set, ZEUS does not start a bridge subprocess and requires this endpoint to be available. |
+| `WEBUI_BRIDGE_PORT` | `5002` | Port for the central WebSocket bridge when `BRIDGE_PORT` is unset. Keep the selected bridge port different from `WEBUI_PORT`. |
+| `WEBUI_BRIDGE_URL` | unset | Optional HTTP(S) base URL for an independently managed WebUI bridge; Node connects to its `/ws` WebSocket endpoint. When set, ZEUS does not start a bridge subprocess and requires this endpoint to be available. |
 
-The WebUI bridge is separate from the platform bridge used by Discord and
-Telegram.
+When WebUI and bot platforms run together, they share the central bridge on
+`BRIDGE_PORT`. A WebUI-only run starts the same central bridge on
+`BRIDGE_PORT` or, if unset, `WEBUI_BRIDGE_PORT`.
 
 Conversation titles are generated after the first response has completed, so
 title inference does not delay the chat response. ZEUS uses the same provider
@@ -104,15 +105,17 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 | `SLASH_GUILD_ID` | Optional Discord server ID for faster guild-scoped slash-command registration. |
 | `SLASH_RESET` | Set to `true` for a one-time reset of registered Discord slash commands. |
 | `BRIDGE_HOST` | Bind address for the Discord/Telegram platform inference bridge. |
-| `BRIDGE_PORT` | Port for the Discord/Telegram platform inference bridge; defaults to `5000`. |
-| `BRIDGE_URL` | Node bot URL for that platform bridge; defaults to `http://127.0.0.1:5000`. |
-| `BRIDGE_TOKEN` | Required private bearer token shared by the Node bot and Python platform bridge. `setup.py` generates it. |
+| `BRIDGE_PORT` | Port for the central bridge used by Discord, Telegram, and WebUI; defaults to `5000` for platform runs. |
+| `BRIDGE_URL` | Node bot base URL for that platform bridge; defaults to `http://127.0.0.1:5000` and connects to `/ws`. |
+| `BRIDGE_TOKEN` | Required private bearer token for platform RPC and WebUI RPC when both share the central bridge. `setup.py` generates it. |
 | `HEALTHCHECK_HOST` | Healthcheck bind/target host. Defaults to `127.0.0.1`. |
 | `HEALTHCHECK_PORT` | Bot health endpoint port when a bot is enabled; defaults to `3001` under the Python supervisor. |
 
-The platform bridge requires `Authorization: Bearer <BRIDGE_TOKEN>` for every
-endpoint except `/health`. This protects control, session, and inference APIs
-even when the bridge is accessed through a proxy or exposed beyond loopback.
+Platform WebSocket RPC requests require `Authorization: Bearer <BRIDGE_TOKEN>`.
+WebUI RPC uses the same token when sharing a platform bridge. The HTTP
+`/health` endpoint remains available for supervisor health checks.
+This protects control, session, and inference APIs even when the bridge is
+accessed through a proxy or exposed beyond loopback.
 Use a long random token and keep it private. Requests larger than 16 MiB are
 rejected. This is service-level authorization: any holder of the shared token
 can access any platform session through the bridge; end-user ownership checks

@@ -26,6 +26,7 @@ from core.database import DatabaseRouter
 from core.memory import MemoryStore
 from core.session_manager import SessionManager
 from router.router import InferenceRequest, Message, Router
+from src.websocket import MAX_WEBSOCKET_MESSAGE_BYTES, websocket_manager
 from vendor.worker.browser import BrowserLoop
 
 log = logging.getLogger("webui_bridge")
@@ -105,6 +106,8 @@ class WebUiBridge:
             await self._lifespan(receive, send)
         elif scope["type"] == "http":
             await self._http(scope, receive, send)
+        elif scope["type"] == "websocket":
+            await websocket_manager.handle(scope, receive, send, self._http)
 
     async def _lifespan(self, receive: Any, send: Any) -> None:
         while True:
@@ -328,10 +331,16 @@ async def _stream_inference(request: InferenceRequest, receive: Any, send: Any) 
 
     inference_task = asyncio.create_task(stream_response())
     disconnect_task = asyncio.create_task(wait_for_disconnect())
-    done, _ = await asyncio.wait(
-        (inference_task, disconnect_task),
-        return_when=asyncio.FIRST_COMPLETED,
-    )
+    try:
+        done, _ = await asyncio.wait(
+            (inference_task, disconnect_task),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+    except asyncio.CancelledError:
+        inference_task.cancel()
+        disconnect_task.cancel()
+        await asyncio.gather(inference_task, disconnect_task, return_exceptions=True)
+        raise
     if disconnect_task in done:
         disconnect_task.result()
         if not inference_task.done():
@@ -353,7 +362,13 @@ def create_app(*, browser_loop: BrowserLoop | None = None) -> WebUiBridge:
 def main() -> None:
     if uvicorn is None:
         raise RuntimeError("uvicorn is required: install the project requirements")
-    uvicorn.run(create_app(), host=_BRIDGE_HOST, port=_BRIDGE_PORT, log_config=None)
+    uvicorn.run(
+        create_app(),
+        host=_BRIDGE_HOST,
+        port=_BRIDGE_PORT,
+        log_config=None,
+        ws_max_size=MAX_WEBSOCKET_MESSAGE_BYTES,
+    )
 
 
 if __name__ == "__main__":

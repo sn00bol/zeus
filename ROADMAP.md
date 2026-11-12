@@ -24,6 +24,4 @@ src/
 Database: PostgresSQL
 
 TODOS:
-- Refactor entirely platform selection and remove 'PLATFORM' in `.env`, fix HTTP bugs
-- Unify websocket manager
 - Allow to use search engine on platform
