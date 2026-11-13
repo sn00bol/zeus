@@ -1,5 +1,6 @@
 const sessionKey = 'zeus.webui.conversationId';
 const bootKey = 'zeus.webui.bootId';
+const memoryUserKey = 'zeus.webui.memoryUserId';
 
 export function createSessionId() {
     return typeof crypto.randomUUID === 'function'
@@ -17,6 +18,15 @@ export function getSessionId() {
     } else if (!id) {
         id = createSessionId();
         localStorage.setItem(sessionKey, id);
+    }
+    return id;
+}
+
+export function getMemoryUserId() {
+    let id = localStorage.getItem(memoryUserKey);
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+        id = createSessionId();
+        localStorage.setItem(memoryUserKey, id);
     }
     return id;
 }

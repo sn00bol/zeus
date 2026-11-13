@@ -106,6 +106,30 @@ class WebUiBridgeTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_model_configuration_endpoint_reads_database_without_exposing_api_key(self) -> None:
+        fake_router = type("FakeRouter", (), {
+            "model_manager": type("FakeModelManager", (), {
+                "configuration": AsyncMock(return_value={
+                    "provider": "ollama",
+                    "model": "database-model",
+                    "ollama_api_key": "do-not-return-this",
+                }),
+            })(),
+        })()
+        with patch.object(webui_bridge, "_router", fake_router):
+            response = await call_asgi(
+                webui_bridge.create_app(),
+                "GET",
+                "/model-configuration",
+            )
+
+        self.assertEqual(response[0]["status"], 200)
+        self.assertEqual(
+            response_json(response),
+            {"provider": "ollama", "model": "database-model"},
+        )
+        self.assertNotIn("do-not-return-this", response[-1]["body"].decode("utf-8"))
+
     async def test_infer_rejects_empty_messages(self) -> None:
         response = await call_asgi(
             webui_bridge.create_app(),

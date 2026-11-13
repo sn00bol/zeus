@@ -287,7 +287,7 @@ class InMemoryDatabasePool:
                     term.casefold() for term in str(args[2]).split(" | ")
                 } if len(args) > 2 else set()
                 limit = int(args[3]) if len(args) > 3 else len(collection)
-                matched: list[tuple[int, InMemoryRecord]] = []
+                matched: list[tuple[int, datetime, InMemoryRecord]] = []
                 for item in collection:
                     if (
                         item["platform"] != plat
@@ -299,12 +299,85 @@ class InMemoryDatabasePool:
                     score = sum(term in content.casefold() for term in query_terms)
                     if query_terms and score == 0:
                         continue
-                    matched.append((score, InMemoryRecord({
+                    matched.append((score, item.get("created_at", now), InMemoryRecord({
                         "content": content,
                         "relevance": float(score),
+                        "sort_at": item.get("created_at", now),
+                        "memory_id": item["memory_id"],
                     })))
-                matched.sort(key=lambda item: item[0], reverse=True)
-                return [record for _, record in matched[:limit]]
+
+                if "RECENT_ACTIVITY AS" not in upper_q:
+                    matched = [item for item in matched if item[0] > 0]
+                    matched.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                    results = matched[:limit]
+                    if "UPDATE EXTRACTED_MEMORIES" in upper_q:
+                        retention_days = int(args[4]) if len(args) > 4 else 30
+                        for _, _, record in results:
+                            for item in collection:
+                                if item["memory_id"] == record["memory_id"]:
+                                    item["expires_at"] = now + timedelta(days=retention_days)
+                                    break
+                    return [record for _, _, record in results]
+
+                relevant = [item for item in matched if item[0] > 0]
+                relevant.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                relevant = relevant[:limit]
+                relevant_conversations = {
+                    item[2].get("conversation_id") for item in relevant
+                }
+
+                activity: dict[str, datetime] = {}
+                for item in collection:
+                    if (
+                        item["platform"] == plat
+                        and item["user_id"] == user_id
+                        and item.get("expires_at", now) > now
+                        and item.get("conversation_id") not in relevant_conversations
+                    ):
+                        conversation_id = str(item.get("conversation_id", ""))
+                        activity[conversation_id] = max(
+                            activity.get(conversation_id, item.get("created_at", now)),
+                            item.get("created_at", now),
+                        )
+                recent_conversations = sorted(
+                    activity.items(), key=lambda item: item[1], reverse=True,
+                )[:limit]
+                recent: list[tuple[int, datetime, InMemoryRecord]] = []
+                for conversation_id, last_activity in recent_conversations:
+                    conversation_turns = [
+                        item for item in collection
+                        if item["platform"] == plat
+                        and item["user_id"] == user_id
+                        and item.get("conversation_id") == conversation_id
+                        and item.get("expires_at", now) > now
+                    ]
+                    if not conversation_turns:
+                        continue
+                    first_turn = min(
+                        conversation_turns,
+                        key=lambda item: (item.get("created_at", now), item["memory_id"]),
+                    )
+                    recent.append((0, last_activity, InMemoryRecord({
+                        "content": first_turn["content"],
+                        "relevance": 0.0,
+                        "sort_at": last_activity,
+                        "memory_id": first_turn["memory_id"],
+                        "conversation_id": conversation_id,
+                    })))
+
+                results = sorted(
+                    [*relevant, *recent],
+                    key=lambda item: (item[0], item[1]),
+                    reverse=True,
+                )[:limit]
+                if "UPDATE CONVERSATION_MEMORIES" in upper_q or "UPDATE EXTRACTED_MEMORIES" in upper_q:
+                    retention_days = int(args[4]) if len(args) > 4 else 30
+                    for _, _, record in results:
+                        for item in collection:
+                            if item["memory_id"] == record["memory_id"]:
+                                item["expires_at"] = now + timedelta(days=retention_days)
+                                break
+                return [record for _, _, record in results]
 
             return []
 
@@ -327,6 +400,7 @@ class InMemoryDatabasePool:
             "user_id": user_id,
             "conversation_id": conversation_id,
             "content": content,
+            "created_at": datetime.now(timezone.utc),
             "expires_at": expires_at,
         }))
         return InMemoryRecord({"memory_id": memory_id})

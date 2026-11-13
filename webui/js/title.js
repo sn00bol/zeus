@@ -32,11 +32,23 @@ function normalizeGeneratedTitle(value) {
 
 function createTitleGenerationService({ request = requestJson } = {}) {
     return async function generateConversationTitle({ message, provider, model }) {
-        const hasProvider = typeof provider === 'string' && Boolean(provider.trim());
-        const hasModel = typeof model === 'string' && Boolean(model.trim());
+        let selectedProvider = provider;
+        let selectedModel = model;
+        const hasProvider = typeof selectedProvider === 'string' && Boolean(selectedProvider.trim());
+        const hasModel = typeof selectedModel === 'string' && Boolean(selectedModel.trim());
         if (hasProvider !== hasModel) {
             throw new Error('The conversation title model must include both provider and model.');
         }
+        if (!hasProvider) {
+            const configuration = await request('/model-configuration', { timeoutMs: 0 });
+            selectedProvider = configuration?.provider;
+            selectedModel = configuration?.model;
+        }
+        const useSelectedModel = (
+            typeof selectedProvider === 'string' && Boolean(selectedProvider.trim())
+        ) && (
+            typeof selectedModel === 'string' && Boolean(selectedModel.trim())
+        ) && !['auto', 'automatic'].includes(selectedModel.trim().toLowerCase());
 
         const response = await request('/infer', {
             method: 'POST',
@@ -49,13 +61,15 @@ function createTitleGenerationService({ request = requestJson } = {}) {
                         content: Array.isArray(message) ? message : String(message || ''),
                     },
                 ],
-                ...(hasProvider ? { provider, model } : {}),
+                ...(useSelectedModel
+                    ? { provider: selectedProvider, model: selectedModel }
+                    : {}),
                 stream: false,
                 temperature: 0.1,
                 max_tokens: 64,
                 platform: 'webui',
                 think: false,
-                strict_model: hasProvider,
+                strict_model: useSelectedModel,
                 disable_backend_timeout: true,
             },
         });

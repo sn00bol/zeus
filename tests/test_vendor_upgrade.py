@@ -4,8 +4,8 @@ import asyncio
 import unittest
 
 from core.database import InMemoryDatabasePool
-from core.model import _memory_reference_message
 from core.memory import MemoryStore
+from core.model import _memory_reference_message
 from src.tools.search import SearchResult
 from vendor.memories.schema import MemoryKind
 from vendor.memories.store import MemoryBridge
@@ -173,6 +173,44 @@ class MemorySeparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(facts.entries[0].kind, MemoryKind.EXTRACTED_FACT)
         self.assertEqual(forgotten, 2)
         self.assertEqual(len(remaining_facts.entries), 1)
+
+    async def test_vague_follow_up_recalls_recent_conversation_starter(self) -> None:
+        database = InMemoryDatabasePool()
+        store = MemoryStore(database)  # type: ignore[arg-type]
+        await store.remember_turn(
+            platform="webui",
+            user_id="webui-browser-1",
+            conversation_id="santaa-project",
+            question="How do I build a Discord bot called Santaa?",
+            answer="Create a Discord application and configure its bot token.",
+        )
+        await store.remember_turn(
+            platform="webui",
+            user_id="webui-browser-1",
+            conversation_id="santaa-project",
+            question="How should I organize its commands?",
+            answer="Keep each command in its own module.",
+        )
+        await store.remember_turn(
+            platform="webui",
+            user_id="webui-browser-1",
+            conversation_id="unrelated-project",
+            question="How do I make a simple weather dashboard?",
+            answer="Start with a small page and a weather API.",
+        )
+
+        recalled = await store.retrieve(
+            platform="webui",
+            user_id="webui-browser-1",
+            query="Add a feature to it",
+        )
+
+        self.assertTrue(any("Santaa" in memory for memory in recalled))
+        self.assertFalse(any("Santaa" in memory for memory in await store.retrieve(
+            platform="discord",
+            user_id="webui-browser-1",
+            query="Add a feature to it",
+        )))
 
 
 class EmbeddingContractTests(unittest.TestCase):

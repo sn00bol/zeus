@@ -151,6 +151,13 @@ class WebUiBridge:
         if method == "GET" and path == "/status":
             await _send_json(send, {"model": await _router.model_manager.status()})
             return
+        if method == "GET" and path == "/model-configuration":
+            configuration = await _router.model_manager.configuration()
+            await _send_json(send, {
+                "provider": configuration["provider"],
+                "model": configuration["model"],
+            })
+            return
         if method != "POST" or path != "/infer":
             await _send_json(send, {"error": "Not found."}, status=404)
             return

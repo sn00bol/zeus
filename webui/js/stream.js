@@ -14,8 +14,17 @@ export async function startChatStream({
     attachments = [],
     isTemporary = false,
     messages = [],
+    memoryUserId,
 }) {
-    const payload = { conversationId, message, tools, attachments, isTemporary, messages };
+    const payload = {
+        conversationId,
+        message,
+        tools,
+        attachments,
+        isTemporary,
+        messages,
+        memoryUserId,
+    };
     if (think !== undefined) payload.think = think;
     const response = await fetch('/api/chat', {
         method: 'POST',

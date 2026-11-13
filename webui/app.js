@@ -15,6 +15,7 @@ const { createTitleGenerationService } = require('./js/title');
 const PLATFORM = 'webui';
 const DEFAULT_CONVERSATION_TITLE = 'New conversation';
 const MAX_BODY_BYTES = 64 * 1024 * 1024; // 64 MB
+const MODEL_LIST_CACHE_MS = 5 * 60 * 1000;
 const TEXT_ATTACHMENT_EXTENSIONS = new Set([
     'txt', 'md', 'markdown', 'rst', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml',
     'toml', 'xml', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx',
@@ -75,6 +76,15 @@ function validateConversationId(value) {
         throw new HttpError(400, 'conversationId must contain 1-128 letters, numbers, "_" or "-".');
     }
     return value;
+}
+
+function validateMemoryUserId(value) {
+    if (value === undefined) return null;
+    if (typeof value !== 'string'
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+        throw new HttpError(400, 'memoryUserId must be a UUID.');
+    }
+    return `webui-${value}`;
 }
 
 function validateStreamId(value) {
@@ -186,6 +196,29 @@ function createWebUiServer({
     titleGenerator = createTitleGenerationService({ request: bridgeRequest }),
 } = {}) {
     const bootId = randomUUID();
+    let modelListCache = null;
+    let modelListCacheAt = 0;
+    let modelListRequest = null;
+    const getAvailableModels = async () => {
+        if (modelListCache && Date.now() - modelListCacheAt < MODEL_LIST_CACHE_MS) {
+            return modelListCache;
+        }
+        if (!modelListRequest) {
+            modelListRequest = callBridge('/models')
+                .then(result => {
+                    const models = Array.isArray(result.models) ? result.models : [];
+                    if (models.length) {
+                        modelListCache = models;
+                        modelListCacheAt = Date.now();
+                    }
+                    return models;
+                })
+                .finally(() => {
+                    modelListRequest = null;
+                });
+        }
+        return modelListRequest;
+    };
     const callBridge = async (route, options) => {
         try {
             return await bridgeRequest(route, options);
@@ -526,6 +559,8 @@ function createWebUiServer({
                     SET ${setters.join(', ')}
                     WHERE provider_name = $1 AND model_id = $2
                 `, values);
+                modelListCache = null;
+                modelListCacheAt = 0;
                 if (body.enabled === false) {
                     await db.pool.query(
                         'DELETE FROM model_preferences WHERE provider_name = $1 AND model_id = $2',
@@ -550,13 +585,13 @@ function createWebUiServer({
             }
             if (request.method === 'GET' && url.pathname === '/api/models') {
                 const conversationId = validateConversationId(url.searchParams.get('conversationId'));
-                const [discovery, runtime, preference] = await Promise.all([
-                    callBridge('/models'),
+                const [models, runtime, preference] = await Promise.all([
+                    getAvailableModels(),
                     callBridge('/status'),
                     db.getModelPreference(modelScope(conversationId)),
                 ]);
                 sendJson(response, 200, {
-                    models: Array.isArray(discovery.models) ? discovery.models : [],
+                    models,
                     preference: preference || null,
                     runtime: runtime.model || null,
                 });
@@ -578,8 +613,8 @@ function createWebUiServer({
                     || !provider.trim() || !model.trim()) {
                     throw new HttpError(400, 'Select a valid provider and model, or automatic mode.');
                 }
-                const discovery = await callBridge('/models');
-                const available = Array.isArray(discovery.models) && discovery.models.some(item => (
+                const availableModels = await getAvailableModels();
+                const available = availableModels.some(item => (
                     item.provider === provider && item.model === model
                 ));
                 if (!available) {
@@ -712,6 +747,7 @@ function createWebUiServer({
             if (request.method === 'POST' && url.pathname === '/api/chat') {
                 const body = await readJson(request);
                 const conversationId = validateConversationId(body.conversationId);
+                const memoryUserId = validateMemoryUserId(body.memoryUserId);
                 const attachments = validateAttachments(body.attachments);
                 if (typeof body.message !== 'string'
                     || (!body.message.trim() && !attachments.length)) {
@@ -729,7 +765,9 @@ function createWebUiServer({
 
                 const isTemporary = conversationId.startsWith('temp-')
                     || Boolean(body.isTemporary || body.temporary);
-                const userId = `webui-${conversationId}`;
+                const userId = isTemporary
+                    ? `webui-${conversationId}`
+                    : memoryUserId || `webui-${conversationId}`;
                 let history;
                 let titlePrompt = null;
                 if (isTemporary) {

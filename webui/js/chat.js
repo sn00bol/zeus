@@ -7,7 +7,7 @@ import {
     renderStreamDetails,
 } from './streamaddon.js';
 import { startChatStream, watchChatStream } from './stream.js';
-import { loadSessionHistory, getSessionId } from './session.js';
+import { loadSessionHistory, getSessionId, getMemoryUserId } from './session.js';
 import { initializeSettings } from './settings.js';
 import { initializeSidebar } from './sidebar.js';
 import { initializeScrollbar } from './scrollbar.js';
@@ -80,6 +80,7 @@ const sessionHistoryLoads = new Map();
 let switchSequence = 0;
 let modelChoices = [];
 let modelPreference = null;
+let pendingModelPreferenceSave = Promise.resolve();
 let runtimeModel = null;
 let settings = null;
 let availableTools = [];
@@ -689,16 +690,25 @@ function renderModelMenu() {
 }
 
 async function chooseModel(model, { showError = true } = {}) {
+    const sessionId = conversationId;
+    const previousPreference = modelPreference;
+    modelPreference = model ? { provider: model.provider, model: model.model } : null;
+    setModelLabel();
+    renderModelMenu();
+    modelMenu.hidden = true;
+    modelButton.setAttribute('aria-expanded', 'false');
     modelButton.disabled = true;
+    const save = setModelChoice(sessionId, model);
+    pendingModelPreferenceSave = save.catch(() => {});
     try {
-        await setModelChoice(conversationId, model);
-        modelPreference = model ? { provider: model.provider, model: model.model } : null;
-        setModelLabel();
-        renderModelMenu();
-        modelMenu.hidden = true;
-        modelButton.setAttribute('aria-expanded', 'false');
+        await save;
         return true;
     } catch (error) {
+        if (sessionId === conversationId) {
+            modelPreference = previousPreference;
+            setModelLabel();
+            renderModelMenu();
+        }
         if (showError) window.alert(`Could not change the model: ${error.message}`);
         if (!showError) throw error;
         return false;
@@ -1605,6 +1615,7 @@ form.addEventListener('submit', async event => {
     if (chatTitleButton) chatTitleButton.hidden = Boolean(temporaryMessages);
 
     try {
+        await pendingModelPreferenceSave;
         const streamId = await startChatStream({
             conversationId: sessionId,
             message: requestText,
@@ -1613,6 +1624,7 @@ form.addEventListener('submit', async event => {
             attachments,
             isTemporary: Boolean(temporaryMessages),
             messages: temporaryMessages || [],
+            memoryUserId: getMemoryUserId(),
         });
         activeStreams.set(sessionId, streamId);
         if (sessionId === conversationId) updateSendButton();
