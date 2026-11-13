@@ -1,20 +1,18 @@
 # CHANGELOG
 
 ## v1.1.1 - 11.13.2026
-What changed:
-- Fix WebUI memory can't remember anything
-- Fix switching model WebUI delay, title generator bugs
-- Add clean and run python test
-
-## v1.1.0 - 11.12.2026
 Release note:
 
 1. This version currently work stable on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb"
 2. This version **HIGHLY** supporting for Ollama Provider (cuz it my main), if you using LMStudio or llama.cpp you could face bug and glitch or not fully feature for your provider
 
 What changed:
-- Refactor entirely platform selection and remove 'PLATFORM' in `.env`, fix HTTP bugs ([d8db3c3](https://github.com/sn00bol/zeus/commit/d8db3c3fc67247e9fa8e26b28251885ea8f57c21))
-- Unify websocket manager ([Release note:
+- Fix WebUI memory can't remember anything ([6079eb3](https://github.com/sn00bol/zeus/commit/6079eb3fd7d888905146abd1736073a22578aaf4))
+- Fix switching model WebUI delay, title generator bugs ([6079eb3](https://github.com/sn00bol/zeus/commit/6079eb3fd7d888905146abd1736073a22578aaf4))
+- Add clean and run python test ([3791432](https://github.com/sn00bol/zeus/commit/3791432f2faf705dc45f9168263d78343d6290d6))
+
+## v1.1.0 - 11.12.2026
+Release note:
 
 1. This version currently work stable on WebUI and Discord, telegram are in expirements and testing, setup.py are sometimes "dumb"
 2. This version **HIGHLY** supporting for Ollama Provider (cuz it my main), if you using LMStudio or llama.cpp you could face bug and glitch or not fully feature for your provider
