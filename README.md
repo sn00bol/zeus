@@ -39,18 +39,6 @@ The WebUI is available at `http://localhost:3000` (or the port configured by `WE
 
 For full native install, running docker, update and troubleshooting instruct, check at [setup guide](docs/SETUP.md).
 
-## Developer commands
-```bash
-npm run dev
-npm test
-npm run test:python
-npm run test:all
-npm run clean:cache -- --dry-run
-npm run clean:cache
-```
-
-The Python test command uses `.venv` when available (or `PYTHON_EXECUTABLE`/`PYTHON`). The cache cleaner removes Python bytecode and common test/linter caches; it does not remove dependencies, virtual environments, database files, or build output.
-
 ## Contributing
 Zeus is openly welcome who pull request and contributing to this small project, for more details you can read [CONTRIBUTING.md](CONTRIBUTING.md)
 
