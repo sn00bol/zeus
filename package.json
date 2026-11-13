@@ -5,7 +5,10 @@
     "slash-register": "node platform/registerCommands.js",
     "slash-reset": "node platform/registerCommands.js --reset",
     "healthcheck": "node platform/healthcheck.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:python": "node scripts/pythonts.js",
+    "test:all": "npm test && npm run test:python",
+    "clean": "node scripts/clean.js"
   },
   "author": "sn00bol",
   "license": "GPL-3.0-only",

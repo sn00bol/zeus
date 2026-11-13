@@ -4,7 +4,7 @@
 What changed:
 - Fix WebUI memory can't remember anything
 - Fix switching model WebUI delay, title generator bugs
-- Add some scripts only for development
+- Add clean and run python test
 
 ## v1.1.0 - 11.12.2026
 Release note:
